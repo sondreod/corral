@@ -54,7 +54,7 @@
 
   /* overview */
   #overview { overflow-y: auto; padding: 16px; flex: 1; }
-  #cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 12px; }
+  #cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(420px, 100%), 1fr)); gap: 12px; }
   .card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
           padding: 12px 14px; cursor: pointer; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
   .card:hover { border-color: var(--accent); }
@@ -68,7 +68,8 @@
   .tile .value { font-size: 17px; font-weight: 600; white-space: nowrap; }
   .tile .sub { color: var(--muted); font-size: 11px; min-height: 15px; }
   .sparks { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-  .spark .label { color: var(--muted); font-size: 11px; }
+  .spark .head { display: flex; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 11px; }
+  .spark .max { font-variant-numeric: tabular-nums; }
 
   /* script page */
   #script { flex: 1; display: flex; flex-direction: column; min-height: 0; }
@@ -187,6 +188,7 @@
 "use strict";
 const PAGE = 500, MAX_DOM_LINES = 20000;
 const OVERVIEW_RANGE = 3600;
+const GIB = 1073741824;
 const RANGES = [["15 min", 900], ["1 h", 3600], ["6 h", 21600], ["24 h", 86400], ["7 d", 604800]];
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -340,10 +342,12 @@ function buildCard(s) {
   tiles.append(t.cpu.box, t.mem.box, t.runs.box, t.lines.box);
   const sparks = el("div", "sparks");
   const spark = (label) => {
-    const box = el("div", "spark"), chart = el("div", "chart");
-    box.append(el("div", "label", label), chart);
+    const box = el("div", "spark"), head = el("div", "head"), chart = el("div", "chart");
+    const max = el("span", "max");  // the value at the top of the chart's scale
+    head.append(el("span", "label", label), max);
+    box.append(head, chart);
     sparks.append(box);
-    return chart;
+    return { chart, max };
   };
   const cpuSpark = spark("CPU, last hour"), memSpark = spark("Memory, last hour");
   const bottom = el("div", "bottom");
@@ -385,8 +389,14 @@ function drawOverviewCharts(name) {
   fillHistoryTiles(c.t, data, rangeLabel(OVERVIEW_RANGE));
   const series = (key, scale = 1) =>
     [{ color: "var(--series-1)", values: data.points.map((p) => [p.t, p[key] == null ? null : p[key] / scale]) }];
-  drawChart(c.cpuSpark, { ...data, series: series("cpu"), spark: true });
-  drawChart(c.memSpark, { ...data, series: series("rss", 1048576), spark: true });
+  // One scale for all cards, so the charts can be compared between scripts.
+  const top = (key, scale = 1) => niceMax(Math.max(0, ...[...overviewData.values()].flatMap(
+    (d) => d.points.map((p) => p[key] || 0))) / scale);
+  const cpuTop = top("cpu"), memTop = top("rss", GIB);
+  c.cpuSpark.max.textContent = fmtCount(cpuTop) + "%";
+  c.memSpark.max.textContent = +memTop.toPrecision(2) + " GB";
+  drawChart(c.cpuSpark.chart, { ...data, series: series("cpu"), spark: true, top: cpuTop });
+  drawChart(c.memSpark.chart, { ...data, series: series("rss", GIB), spark: true, top: memTop });
 }
 
 async function refreshOverviewMetrics() {
@@ -394,9 +404,10 @@ async function refreshOverviewMetrics() {
   await Promise.all(scripts.map(async (s) => {
     try {
       overviewData.set(s.name, await api(scriptUrl(s.name, `metrics?range=${OVERVIEW_RANGE}&points=60`)));
-      drawOverviewCharts(s.name);
     } catch (err) { /* the status poll reports connection problems */ }
   }));
+  for (const name of [...overviewData.keys()]) if (!cards.has(name)) overviewData.delete(name);
+  scripts.forEach((s) => drawOverviewCharts(s.name));  // all of them: the shared scale may have changed
 }
 
 // ---- charts ------------------------------------------------------------
@@ -408,7 +419,7 @@ function niceMax(v) {
 }
 
 // opts: series [{name, color, values: [[t, v|null], ...]}], since, now, bucket,
-//       fmt (value -> text), spark (true: no axes, no hover)
+//       fmt (value -> text), spark (true: no axes, no hover), top (fixed top of the scale)
 function drawChart(box, opts) {
   const spark = !!opts.spark;
   const W = Math.max(box.clientWidth, 80), H = spark ? 34 : 170;
@@ -416,7 +427,7 @@ function drawChart(box, opts) {
   const fmt = opts.fmt || fmtCount;
   const t0 = opts.since, t1 = Math.max(opts.now, t0 + 1), half = opts.bucket / 2;
   const all = opts.series.flatMap((s) => s.values.map((v) => v[1]).filter((v) => v != null));
-  const top = niceMax(Math.max(0, ...all));
+  const top = opts.top || niceMax(Math.max(0, ...all));
   const x = (t) => m.l + (Math.min(t + half, t1) - t0) / (t1 - t0) * (W - m.l - m.r);
   const y = (v) => H - m.b - v / top * (H - m.t - m.b);
 
@@ -439,6 +450,7 @@ function drawChart(box, opts) {
       root.append(label);
     }
   }
+  if (spark && opts.top) root.append(svg("line", { class: "gridline", x1: m.l, x2: W - m.r, y1: y(top), y2: y(top) }));
   root.append(svg("line", { class: "baseline", x1: m.l, x2: W - m.r, y1: y(0), y2: y(0) }));
 
   for (const s of opts.series) {
