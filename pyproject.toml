@@ -10,10 +10,7 @@ dependencies = []
 scriptrunner = "scriptrunner.cli:main"
 
 [dependency-groups]
-dev = ["pytest>=8", "scriptrunner-metrics"]
-
-[tool.uv.sources]
-scriptrunner-metrics = { path = "client", editable = true }
+dev = ["pytest>=8"]
 
 [build-system]
 requires = ["uv_build>=0.13.1,<0.14.0"]

@@ -1,5 +1,9 @@
 """Report metrics from a script run by scriptrunner.
 
+This module is for the scripts, not for the runner: a script depends on the
+``scriptrunner`` package and imports ``scriptrunner.metrics``. It uses nothing
+else from the package and only the standard library.
+
 The classes mirror ``prometheus_client``: create ``Counter``, ``Gauge``,
 ``Histogram`` and ``Summary`` objects once, then call ``inc``, ``set``,
 ``observe`` and so on. Instead of keeping the values in this process, each
@@ -23,7 +27,6 @@ import threading
 import time
 
 __all__ = ["Counter", "Gauge", "Histogram", "Summary", "DEFAULT_BUCKETS", "enabled"]
-__version__ = "0.1.0"
 
 DEFAULT_BUCKETS = (0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 2.5, 5.0, 7.5, 10.0)
 

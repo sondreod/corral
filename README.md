@@ -148,18 +148,15 @@ scripts that failed in the last hour.
 ### Metrics from your scripts
 
 Scripts can report their own metrics, which appear on the same `/metrics`
-page with a `script` label added. In Python, use the `scriptrunner-metrics`
-library in [`client/`](client/README.md); it has no dependencies and works
-like `prometheus_client`:
+page with a `script` label added. In Python, use `scriptrunner.metrics`, a
+module of this package made for the scripts; it needs only the standard
+library and works like `prometheus_client`:
 
 ```python
 # /// script
-# dependencies = ["scriptrunner-metrics"]
-#
-# [tool.uv.sources]
-# scriptrunner-metrics = { path = "/usr/share/scriptrunner/client" }
+# dependencies = ["scriptrunner"]
 # ///
-from scriptrunner_metrics import Counter, Gauge, Histogram
+from scriptrunner.metrics import Counter, Gauge, Histogram
 
 JOBS = Counter("jobs_processed", "Jobs processed", ["queue"])
 DEPTH = Gauge("queue_depth", "Jobs waiting")
@@ -171,11 +168,29 @@ with DURATION.time():
     ...
 ```
 
-The Debian package installs the library's source in
-`/usr/share/scriptrunner/client`; from a checkout, point the path at the
-`client` directory (as [`examples/report.py`](examples/report.py) does). A
-project names it the same way in its `pyproject.toml`: in `dependencies`,
-with the path under `[tool.uv.sources]`.
+The script gets the module by depending on the `scriptrunner` package like
+on any other. The package is not on an index, so the header also says where
+it is: the path of a checkout of this repository. A relative path is taken
+from the script's own directory, as in
+[`examples/batch.py`](examples/batch.py):
+
+```python
+# /// script
+# dependencies = ["scriptrunner"]
+#
+# [tool.uv.sources]
+# scriptrunner = { path = "/path/to/scriptrunner" }
+# ///
+```
+
+The runner's user must be able to read that directory. uv builds the package
+from it once and caches the result. It rebuilds when the checkout's
+`pyproject.toml` changes (a new version, say), not on every source edit;
+`uv cache clean scriptrunner` forces it.
+
+A project does the same in its `pyproject.toml`. The script's copy is
+independent of the runner that starts it (the Debian package does not provide
+it), and as the package needs Python 3.11, so does the script.
 
 There are `Counter` (`inc`, `count_exceptions`), `Gauge` (`set`, `inc`,
 `dec`, `set_to_current_time`, `time`), `Histogram` and `Summary` (`observe`,

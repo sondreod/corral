@@ -26,3 +26,9 @@ project = "demo-project"
 entrypoint = "demo_project:housekeeping"   # module:function, no declared script needed
 mode = "schedule"
 every = "30s"
+
+# Reports its own metrics (see /metrics):
+[scripts.batch]
+path = "batch.py"
+mode = "schedule"
+every = "15s"

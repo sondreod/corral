@@ -3,15 +3,10 @@
 import sys
 import time
 
-from scriptrunner_metrics import Counter
-
-TICKS = Counter("example_clock_ticks", "Times the clock announced the time")
-
 
 def clock() -> None:
     while True:
         print(time.strftime("it is %H:%M:%S"))
-        TICKS.inc()
         time.sleep(5)
 
 

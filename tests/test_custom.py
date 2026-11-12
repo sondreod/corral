@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-import scriptrunner_metrics as client
+from scriptrunner import metrics as client
 from scriptrunner import prometheus
 from scriptrunner.custom import MAX_SERIES, MetricError, ScriptMetrics
 
@@ -202,7 +202,7 @@ def test_client_is_silent_outside_the_runner(emitted, monkeypatch):
 def test_script_metrics_reach_the_metrics_page(tmp_path, harness):  # noqa: F811
     body = (
         "import os, time\n"
-        "from scriptrunner_metrics import Counter, Gauge\n"
+        "from scriptrunner.metrics import Counter, Gauge\n"
         "assert os.environ['SCRIPTRUNNER_METRICS'] == '1'\n"
         "runs = Counter('batch_runs', 'Batches run', ['result'])\n"
         "runs.labels('ok').inc()\n"

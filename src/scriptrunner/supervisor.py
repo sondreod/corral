@@ -229,7 +229,7 @@ class Script:
     def _run_once(self, gen: int) -> None:
         cfg = self.cfg
         cmd = None
-        # SCRIPTRUNNER_METRICS tells the scriptrunner-metrics library that
+        # SCRIPTRUNNER_METRICS tells scriptrunner.metrics in the script that
         # someone is listening for its "@metric" lines.
         env = {**os.environ, "PYTHONUNBUFFERED": "1", "SCRIPTRUNNER_METRICS": "1", **cfg.env}
         started = time.time()

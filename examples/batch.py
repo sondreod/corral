@@ -1,0 +1,27 @@
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["scriptrunner"]
+#
+# [tool.uv.sources]
+# scriptrunner = { path = ".." }   # this checkout; see "Metrics from your scripts" in the README
+# ///
+"""Example scheduled script that reports metrics with scriptrunner.metrics."""
+
+import os
+import shutil
+
+from scriptrunner.metrics import Counter, Gauge, Histogram
+
+BATCHES = Counter("example_batches", "Batches run")  # keeps counting across runs
+DISK_USED = Gauge("example_disk_used_ratio", "Used share of a filesystem", ["mount"])
+LOAD = Gauge("example_load1", "One-minute load average")
+DURATION = Histogram("example_batch_duration_seconds", "Time taken by a batch")
+
+with DURATION.time():
+    usage = shutil.disk_usage("/")
+    load = os.getloadavg()[0]
+
+DISK_USED.labels(mount="/").set(round(usage.used / usage.total, 4))
+LOAD.set(load)
+BATCHES.inc()
+print(f"batch done: disk {usage.used / usage.total:.0%} used, load {load:.2f}")
