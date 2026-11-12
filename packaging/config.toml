@@ -1,0 +1,60 @@
+# scriptrunner configuration.
+# Check it with:    scriptrunner --check
+# Apply changes:    systemctl restart scriptrunner
+
+[server]
+# Address of the web interface. There is no authentication, so only change
+# the host to something reachable from other machines if you trust the network.
+host = "127.0.0.1"
+port = 8723
+
+[runner]
+# Where the log database lives.
+data_dir = "/var/lib/scriptrunner"
+# The uv executable used to run scripts ("uv run --script"). Give a full path
+# if uv is not on the service's PATH (/usr/local/bin, /usr/bin, ...).
+uv = "uv"
+# Log lines kept per script; the oldest are dropped beyond this.
+max_log_lines = 100000
+# How often CPU, memory, threads and open files of each script are measured
+# for the dashboard, and how many days of that history (and of the list of
+# runs) are kept.
+sample_interval = "10s"
+history_days = 7
+
+# One table per script or project entry point. Relative paths are relative to
+# this file's directory, so scripts can live in /etc/scriptrunner/scripts/.
+# Examples to copy are in /usr/share/doc/scriptrunner/examples/.
+#
+# A long-running script, restarted whenever it exits:
+#
+# [scripts.ticker]
+# path = "scripts/ticker.py"
+# mode = "service"            # the default
+# args = ["--interval", "5"]
+# env = { GREETING = "hello" }
+# cwd = "/var/lib/scriptrunner"
+# restart_delay = 2           # seconds; doubles after each quick exit...
+# max_restart_delay = 60      # ...up to this
+# stop_timeout = 10           # seconds between SIGTERM and SIGKILL
+# enabled = true              # false: only started from the web interface
+#
+# An entry point of a Python project, instead of a single script. `project` is
+# a directory containing pyproject.toml; everything else works as above.
+# uv creates .venv (and uv.lock, if missing) inside that directory, so the
+# scriptrunner user must be able to write to it.
+#
+# [scripts.api]
+# project = "/srv/myapp"
+# entrypoint = "myapp-serve"       # a script name from [project.scripts]...
+# # entrypoint = "myapp.jobs:main" # ...or module:function, as in pyproject.toml
+# #                                # (optional if the project declares exactly
+# #                                # one script)
+# args = ["--port", "8000"]
+#
+# A job that runs to completion on a schedule (never overlapping itself):
+#
+# [scripts.report]
+# path = "scripts/report.py"
+# mode = "schedule"
+# every = "15m"               # or: cron = "30 6 * * 1-5"  (local time)

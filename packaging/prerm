@@ -1,0 +1,9 @@
+#!/bin/sh
+set -e
+
+if [ "$1" = "remove" ]; then
+    if [ -d /run/systemd/system ]; then
+        systemctl stop scriptrunner.service || true
+    fi
+    systemctl disable scriptrunner.service >/dev/null 2>&1 || true
+fi

@@ -1,0 +1,28 @@
+# Configuration for trying scriptrunner from a checkout:
+#     uv run scriptrunner --config examples/dev-config.toml
+
+[server]
+port = 8724   # not 8723, so it can run beside an installed scriptrunner service
+
+[runner]
+data_dir = "../.dev-data"
+sample_interval = "2s"   # frequent, so the charts fill quickly while trying things out
+
+[scripts.ticker]
+path = "ticker.py"
+
+[scripts.report]
+path = "report.py"
+mode = "schedule"
+every = "20s"
+
+# Entry points of a project (a directory with pyproject.toml):
+[scripts.clock]
+project = "demo-project"
+entrypoint = "demo-clock"         # a name from [project.scripts]
+
+[scripts.housekeeping]
+project = "demo-project"
+entrypoint = "demo_project:housekeeping"   # module:function, no declared script needed
+mode = "schedule"
+every = "30s"

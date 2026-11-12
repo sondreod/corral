@@ -1,0 +1,783 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>scriptrunner</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f4f5f7; --panel: #ffffff; --border: #d9dce1; --text: #1c1f24; --muted: #68707d;
+    --accent: #2563eb; --selected: #e8effd; --log-bg: #ffffff;
+    --green: #17803d; --amber: #b45309; --red: #c62828; --blue: #2563eb; --grey: #7b8492;
+    --series-1: #2a78d6; --series-2: #eb6834; --grid: #e4e6ea; --axis: #c3c7ce;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14161a; --panel: #1c1f25; --border: #30353e; --text: #e3e6ea; --muted: #939ba8;
+      --accent: #6ea0ff; --selected: #232c40; --log-bg: #101216;
+      --green: #4ade80; --amber: #fbbf24; --red: #f87171; --blue: #6ea0ff; --grey: #8a93a1;
+      --series-1: #3987e5; --series-2: #d95926; --grid: #2a2e36; --axis: #3a404a;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--bg); color: var(--text); font: 14px/1.4 system-ui, sans-serif;
+         display: flex; flex-direction: column; }
+  [hidden] { display: none !important; }
+  button, input { font: inherit; color: inherit; }
+  button { background: var(--panel); border: 1px solid var(--border); border-radius: 5px;
+           padding: 2px 9px; cursor: pointer; }
+  button { white-space: nowrap; }
+  button:hover { border-color: var(--accent); }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  .num { font-variant-numeric: tabular-nums; }
+
+  header { display: flex; align-items: center; gap: 14px; padding: 10px 16px;
+           border-bottom: 1px solid var(--border); background: var(--panel); flex: none; }
+  header h1 { font-size: 15px; margin: 0; }
+  header h1 a { color: inherit; }
+  #error { color: var(--red); }
+
+  /* state colours, shared by cards and the script header */
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--grey); flex: none; }
+  .state { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .03em; color: var(--grey); }
+  .s-running .dot { background: var(--green); } .s-running .state { color: var(--green); }
+  .s-waiting .dot { background: var(--blue); } .s-waiting .state { color: var(--blue); }
+  .s-backoff .dot, .s-starting .dot, .s-stopping .dot { background: var(--amber); }
+  .s-backoff .state, .s-starting .state, .s-stopping .state { color: var(--amber); }
+  .detail { color: var(--muted); font-size: 12px; }
+  .bad { color: var(--red); font-weight: 600; }
+  .actions { display: flex; gap: 6px; }
+
+  /* overview */
+  #overview { overflow-y: auto; padding: 16px; flex: 1; }
+  #cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 12px; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+          padding: 12px 14px; cursor: pointer; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+  .card:hover { border-color: var(--accent); }
+  .card .top { display: flex; align-items: center; gap: 8px; }
+  .card .name { font-weight: 600; font-size: 15px; overflow-wrap: anywhere; flex: 1; }
+  .card .bottom { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .empty { color: var(--muted); padding: 12px 4px; }
+
+  .tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+  .tile .label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .03em; }
+  .tile .value { font-size: 17px; font-weight: 600; white-space: nowrap; }
+  .tile .sub { color: var(--muted); font-size: 11px; min-height: 15px; }
+  .sparks { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .spark .label { color: var(--muted); font-size: 11px; }
+
+  /* script page */
+  #script { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  .scripthead { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 12px 16px 0; }
+  .scripthead h2 { font-size: 17px; margin: 0; overflow-wrap: anywhere; }
+  .scripthead .grow { flex: 1; }
+  .tabs { display: flex; gap: 4px; padding: 10px 16px 0; border-bottom: 1px solid var(--border); }
+  .tabs a { padding: 6px 14px; color: var(--muted); border: 1px solid transparent; border-bottom: 0;
+            border-radius: 6px 6px 0 0; margin-bottom: -1px; }
+  .tabs a:hover { text-decoration: none; color: var(--text); }
+  .tabs a.active { color: var(--text); font-weight: 600; background: var(--bg);
+                   border-color: var(--border); border-bottom: 1px solid var(--bg); }
+
+  #logs { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding: 10px 16px; }
+  #filter { flex: 1; min-width: 160px; background: var(--panel); border: 1px solid var(--border);
+            border-radius: 5px; padding: 4px 8px; }
+  label { white-space: nowrap; user-select: none; }
+  #log { flex: 1; overflow: auto; background: var(--log-bg); padding: 6px 0; font-size: 12.5px;
+         border-top: 1px solid var(--border); }
+  #older { margin: 2px 16px 8px; }
+  .line { display: flex; gap: 10px; padding: 0 16px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .line:hover { background: var(--selected); }
+  .line .ts, .line .tag { color: var(--muted); flex: none; white-space: pre; }
+  .line.stderr .tag, .line.stderr .txt { color: var(--red); }
+  .line.runner .tag, .line.runner .txt { color: var(--blue); font-style: italic; }
+  .line .txt { flex: 1; min-width: 0; }
+
+  #monitor { flex: 1; overflow-y: auto; padding: 14px 16px 24px; }
+  .ranges { display: flex; align-items: center; gap: 6px; margin-bottom: 12px; }
+  .ranges span { color: var(--muted); margin-right: 4px; }
+  .ranges button.active { background: var(--selected); border-color: var(--accent); font-weight: 600; }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; }
+  .panel h3 { font-size: 13px; margin: 0 0 2px; }
+  .panel .hint { color: var(--muted); font-size: 12px; margin-bottom: 6px; }
+  #montiles { margin-bottom: 12px; }
+  #charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 12px; margin-bottom: 12px; }
+  .legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted); }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; }
+
+  .chart { position: relative; }
+  .chart svg { display: block; width: 100%; overflow: visible; }
+  .chart text { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .chart .gridline { stroke: var(--grid); stroke-width: 1; }
+  .chart .baseline { stroke: var(--axis); stroke-width: 1; }
+  .chart .cursor { stroke: var(--muted); stroke-width: 1; }
+  .chart .nodata { fill: var(--muted); font-size: 12px; }
+  .tip { position: absolute; top: 0; pointer-events: none; background: var(--panel); border: 1px solid var(--border);
+         border-radius: 6px; padding: 5px 8px; font-size: 12px; white-space: nowrap; z-index: 2;
+         box-shadow: 0 2px 8px rgba(0, 0, 0, .18); }
+  .tip .when { color: var(--muted); }
+  .tip i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; }
+
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th { text-align: left; color: var(--muted); font-weight: 500; font-size: 12px; }
+  th, td { padding: 4px 16px 4px 0; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+  td:last-child { white-space: normal; overflow-wrap: anywhere; }
+
+  @media (max-width: 520px) {
+    #cards, #charts { grid-template-columns: 1fr; }
+    .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1><a href="#/">scriptrunner</a></h1>
+  <span id="error" hidden></span>
+</header>
+
+<section id="overview">
+  <div id="cards"></div>
+</section>
+
+<section id="script" hidden>
+  <div class="scripthead" id="scripthead">
+    <a href="#/">← All scripts</a>
+    <span class="dot"></span>
+    <h2 id="title"></h2>
+    <span class="state" id="headstate"></span>
+    <span class="detail grow" id="headdetail"></span>
+    <span class="actions" id="headactions"></span>
+  </div>
+  <nav class="tabs">
+    <a id="tab-logs">Logs</a>
+    <a id="tab-monitor">Monitoring</a>
+  </nav>
+
+  <div id="logs">
+    <div class="toolbar">
+      <input id="filter" type="search" placeholder="Filter log lines…" autocomplete="off">
+      <label><input type="checkbox" class="stream" value="stdout" checked> stdout</label>
+      <label><input type="checkbox" class="stream" value="stderr" checked> stderr</label>
+      <label><input type="checkbox" class="stream" value="runner" checked> runner</label>
+      <label><input type="checkbox" id="follow" checked> Follow</label>
+    </div>
+    <div id="log" class="mono"><button id="older" hidden>Load older lines</button><div id="lines"></div></div>
+  </div>
+
+  <div id="monitor" hidden>
+    <div class="ranges" id="ranges"><span>Range</span></div>
+    <div class="panel tiles" id="montiles"></div>
+    <div id="charts"></div>
+    <div class="panel">
+      <h3>Recent runs</h3>
+      <div class="hint" id="runsummary"></div>
+      <table>
+        <thead><tr><th>Started</th><th>Duration</th><th>Result</th></tr></thead>
+        <tbody id="runs"></tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<script>
+"use strict";
+const PAGE = 500, MAX_DOM_LINES = 20000;
+const OVERVIEW_RANGE = 3600;
+const RANGES = [["15 min", 900], ["1 h", 3600], ["6 h", 21600], ["24 h", 86400], ["7 d", 604800]];
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+const $ = (id) => document.getElementById(id);
+const el = (tag, cls, text) => {
+  const node = document.createElement(tag);
+  if (cls) node.className = cls;
+  if (text !== undefined) node.textContent = text;
+  return node;
+};
+const svg = (tag, attrs) => {
+  const node = document.createElementNS(SVG_NS, tag);
+  for (const [k, v] of Object.entries(attrs || {})) node.setAttribute(k, v);
+  return node;
+};
+
+let scripts = [];
+let route = { view: "overview" };
+let view = 0;          // bumped whenever the log view is reset; stale responses are dropped
+let firstId = null, lastId = null, tailBusy = false, loaded = false;
+let monitorRange = RANGES[0][1];
+let monitorData = null;               // last metrics response shown on the Monitoring tab
+const overviewData = new Map();       // script name -> last metrics response
+const cards = new Map();              // script name -> card elements
+
+async function api(path, options) {
+  const res = await fetch(path, options);
+  const body = await res.json();
+  if (!res.ok) throw new Error(body.error || res.statusText);
+  return body;
+}
+const scriptUrl = (name, rest) => `/api/scripts/${encodeURIComponent(name)}/${rest}`;
+
+function showError(err) {
+  $("error").hidden = !err;
+  $("error").textContent = err ? String(err.message || err) : "";
+}
+
+// ---- formatting --------------------------------------------------------
+
+const pad = (n, w = 2) => String(n).padStart(w, "0");
+function stamp(ts, millis = true) {
+  const d = new Date(ts * 1000);
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ` +
+         `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}` +
+         (millis ? `.${pad(d.getMilliseconds(), 3)}` : "");
+}
+function clock(ts, withDay) {
+  const d = new Date(ts * 1000);
+  const hm = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return withDay ? `${d.toLocaleDateString(undefined, { weekday: "short" })} ${hm}` : hm;
+}
+function ago(seconds) {
+  seconds = Math.max(0, Math.round(seconds));
+  if (seconds < 60) return seconds + "s";
+  if (seconds < 3600) return Math.floor(seconds / 60) + "m " + (seconds % 60) + "s";
+  if (seconds < 86400) return Math.floor(seconds / 3600) + "h " + Math.floor(seconds % 3600 / 60) + "m";
+  return Math.floor(seconds / 86400) + "d " + Math.floor(seconds % 86400 / 3600) + "h";
+}
+const trim = (v, digits) => String(Number(v.toFixed(digits)));
+const fmtCount = (v) => v == null ? "–" : trim(v, v < 10 ? 1 : 0);
+const fmtCpu = (v) => v == null ? "–" : trim(v, v < 10 ? 1 : 0) + "%";
+function fmtBytes(v) {
+  if (v == null) return "–";
+  const mb = v / 1048576;
+  return mb >= 1024 ? trim(mb / 1024, 2) + " GB" : trim(mb, mb < 10 ? 1 : 0) + " MB";
+}
+const rangeLabel = (seconds) => (RANGES.find((r) => r[1] === seconds) || ["range"])[0];
+
+// ---- script status -----------------------------------------------------
+
+function describe(s, now) {
+  const parts = [s.mode === "schedule" ? s.schedule : "service"];
+  if (s.entrypoint) parts.push(s.entrypoint);
+  if (s.pid) parts.push("pid " + s.pid);
+  if (s.pid && s.started_at) parts.push("up " + ago(now - s.started_at));
+  if (s.next_run) parts.push((s.state === "backoff" ? "restart in " : "next in ") + ago(s.next_run - now));
+  let bad = null;
+  if (!s.pid && s.exited_at) {
+    const when = " " + ago(now - s.exited_at) + " ago";
+    if (s.exit_code === 0) parts.push("exit 0" + when);
+    else bad = (s.exit_code === null ? "failed to start" : s.exit_code < 0
+      ? "killed (signal " + -s.exit_code + ")" : "exit " + s.exit_code) + when;
+  }
+  return [parts.join(" · "), bad];
+}
+
+function fillDetail(node, s, now) {
+  const [text, bad] = describe(s, now);
+  node.replaceChildren(text);
+  if (bad) node.append(" · ", el("span", "bad", bad));
+}
+
+function fillActions(node, s) {
+  const key = s.mode + s.enabled;
+  if (node.dataset.key === key) return;   // keep buttons stable under the pointer
+  node.dataset.key = key;
+  node.replaceChildren();
+  const scheduled = s.mode === "schedule";
+  const button = (label, action) => {
+    const b = el("button", "", label);
+    b.onclick = async (ev) => {
+      ev.stopPropagation();
+      try {
+        await api(scriptUrl(s.name, action), { method: "POST", headers: { "X-Scriptrunner": "1" } });
+      } catch (err) { showError(err); }
+      refreshScripts();
+    };
+    node.append(b);
+  };
+  if (s.enabled) button(scheduled ? "Disable" : "Stop", "stop");
+  else button(scheduled ? "Enable" : "Start", "start");
+  button(scheduled ? "Run now" : "Restart", "restart");
+}
+
+function tile(label) {
+  const box = el("div", "tile");
+  const value = el("div", "value num", "–"), sub = el("div", "sub");
+  box.append(el("div", "label", label), value, sub);
+  return { box, value, sub };
+}
+
+function fillUsageTiles(t, s) {
+  const u = s.usage;
+  t.cpu.value.textContent = fmtCpu(u && u.cpu);
+  t.mem.value.textContent = fmtBytes(u && u.rss);
+  if (t.threads) t.threads.value.textContent = u ? String(u.threads) : "–";
+  if (t.fds) t.fds.value.textContent = u ? String(u.fds) : "–";
+}
+
+function fillHistoryTiles(t, data, label) {
+  const lines = data.points.reduce((a, p) => [a[0] + p.out_lines, a[1] + p.err_lines], [0, 0]);
+  t.runs.value.textContent = String(data.runs.total);
+  t.runs.sub.replaceChildren(data.runs.failed ? el("span", "bad", data.runs.failed + " failed") : "none failed");
+  t.lines.value.textContent = String(lines[0] + lines[1]);
+  t.lines.sub.textContent = lines[1] + " on stderr";
+  t.runs.box.firstChild.textContent = `Runs · ${label}`;
+  t.lines.box.firstChild.textContent = `Log lines · ${label}`;
+}
+
+// ---- overview ----------------------------------------------------------
+
+function buildCard(s) {
+  const card = el("div", "card");
+  card.onclick = () => { location.hash = `#/s/${encodeURIComponent(s.name)}/monitor`; };
+  const top = el("div", "top");
+  const state = el("span", "state");
+  top.append(el("span", "dot"), el("span", "name", s.name), state);
+  const tiles = el("div", "tiles");
+  const t = { cpu: tile("CPU"), mem: tile("Memory"), runs: tile("Runs"), lines: tile("Log lines") };
+  tiles.append(t.cpu.box, t.mem.box, t.runs.box, t.lines.box);
+  const sparks = el("div", "sparks");
+  const spark = (label) => {
+    const box = el("div", "spark"), chart = el("div", "chart");
+    box.append(el("div", "label", label), chart);
+    sparks.append(box);
+    return chart;
+  };
+  const cpuSpark = spark("CPU, last hour"), memSpark = spark("Memory, last hour");
+  const bottom = el("div", "bottom");
+  const detail = el("div", "detail"), actions = el("div", "actions");
+  bottom.append(detail, actions);
+  card.append(top, tiles, sparks, bottom);
+  return { card, state, t, cpuSpark, memSpark, detail, actions };
+}
+
+function renderOverview() {
+  const now = Date.now() / 1000;
+  const box = $("cards");
+  const names = scripts.map((s) => s.name).join("\n");
+  if (box.dataset.names !== names) {
+    box.dataset.names = names;
+    cards.clear();
+    box.replaceChildren();
+    if (!scripts.length) box.append(el("div", "empty", "No scripts configured."));
+    for (const s of scripts) {
+      const c = buildCard(s);
+      cards.set(s.name, c);
+      box.append(c.card);
+    }
+    refreshOverviewMetrics();
+  }
+  for (const s of scripts) {
+    const c = cards.get(s.name);
+    c.card.className = "card s-" + s.state;
+    c.state.textContent = s.state;
+    fillUsageTiles(c.t, s);
+    fillDetail(c.detail, s, now);
+    fillActions(c.actions, s);
+  }
+}
+
+function drawOverviewCharts(name) {
+  const c = cards.get(name), data = overviewData.get(name);
+  if (!c || !data) return;
+  fillHistoryTiles(c.t, data, rangeLabel(OVERVIEW_RANGE));
+  const series = (key, scale = 1) =>
+    [{ color: "var(--series-1)", values: data.points.map((p) => [p.t, p[key] == null ? null : p[key] / scale]) }];
+  drawChart(c.cpuSpark, { ...data, series: series("cpu"), spark: true });
+  drawChart(c.memSpark, { ...data, series: series("rss", 1048576), spark: true });
+}
+
+async function refreshOverviewMetrics() {
+  if (route.view !== "overview") return;
+  await Promise.all(scripts.map(async (s) => {
+    try {
+      overviewData.set(s.name, await api(scriptUrl(s.name, `metrics?range=${OVERVIEW_RANGE}&points=60`)));
+      drawOverviewCharts(s.name);
+    } catch (err) { /* the status poll reports connection problems */ }
+  }));
+}
+
+// ---- charts ------------------------------------------------------------
+
+function niceMax(v) {
+  if (!(v > 0)) return 1;
+  const p = Math.pow(10, Math.floor(Math.log10(v))), m = v / p;
+  return (m <= 1 ? 1 : m <= 2 ? 2 : m <= 5 ? 5 : 10) * p;
+}
+
+// opts: series [{name, color, values: [[t, v|null], ...]}], since, now, bucket,
+//       fmt (value -> text), spark (true: no axes, no hover)
+function drawChart(box, opts) {
+  const spark = !!opts.spark;
+  const W = Math.max(box.clientWidth, 80), H = spark ? 34 : 170;
+  const m = spark ? { l: 1, r: 1, t: 3, b: 2 } : { l: 52, r: 10, t: 8, b: 22 };
+  const fmt = opts.fmt || fmtCount;
+  const t0 = opts.since, t1 = Math.max(opts.now, t0 + 1), half = opts.bucket / 2;
+  const all = opts.series.flatMap((s) => s.values.map((v) => v[1]).filter((v) => v != null));
+  const top = niceMax(Math.max(0, ...all));
+  const x = (t) => m.l + (Math.min(t + half, t1) - t0) / (t1 - t0) * (W - m.l - m.r);
+  const y = (v) => H - m.b - v / top * (H - m.t - m.b);
+
+  const root = svg("svg", { viewBox: `0 0 ${W} ${H}`, height: H, role: "img" });
+  if (!spark) {
+    for (const frac of [0.5, 1]) {
+      root.append(svg("line", { class: "gridline", x1: m.l, x2: W - m.r, y1: y(top * frac), y2: y(top * frac) }));
+    }
+    for (const frac of [0, 0.5, 1]) {
+      const label = svg("text", { x: m.l - 6, y: y(top * frac) + 4, "text-anchor": "end" });
+      label.textContent = fmt(top * frac);
+      root.append(label);
+    }
+    const span = t1 - t0, ticks = W < 420 ? 3 : 5;
+    for (let i = 0; i <= ticks; i++) {
+      const t = t0 + span * i / ticks;
+      const label = svg("text", { x: m.l + (W - m.l - m.r) * i / ticks, y: H - 6,
+                                  "text-anchor": i === 0 ? "start" : i === ticks ? "end" : "middle" });
+      label.textContent = clock(t, span > 86400);
+      root.append(label);
+    }
+  }
+  root.append(svg("line", { class: "baseline", x1: m.l, x2: W - m.r, y1: y(0), y2: y(0) }));
+
+  for (const s of opts.series) {
+    // Split into runs of consecutive steps; a missing step means "not running".
+    const runs = [];
+    let run = null, last = null;
+    for (const [t, v] of s.values) {
+      if (v == null) { run = null; continue; }
+      if (!run || t - last > opts.bucket * 1.5) runs.push(run = []);
+      run.push([x(t), y(v)]);
+      last = t;
+    }
+    for (const pts of runs) {
+      if (pts.length === 1) {
+        root.append(svg("circle", { cx: pts[0][0], cy: pts[0][1], r: 1.5, fill: s.color }));
+        continue;
+      }
+      const line = pts.map((p, i) => (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1)).join("");
+      if (opts.series.length === 1) {
+        const area = `${line}L${pts[pts.length - 1][0].toFixed(1)} ${y(0)}L${pts[0][0].toFixed(1)} ${y(0)}Z`;
+        root.append(svg("path", { d: area, fill: s.color, opacity: 0.12 }));
+      }
+      root.append(svg("path", { d: line, fill: "none", stroke: s.color, "stroke-width": spark ? 1.5 : 2,
+                                "stroke-linejoin": "round", "stroke-linecap": "round" }));
+    }
+  }
+  if (!all.length && !spark) {
+    const none = svg("text", { class: "nodata", x: (m.l + W - m.r) / 2, y: (m.t + H - m.b) / 2, "text-anchor": "middle" });
+    none.textContent = "No data in this range";
+    root.append(none);
+  }
+  box.replaceChildren(root);
+  if (spark || !all.length) return;
+
+  // Hover: a cursor line snapped to the nearest step, and a tooltip with every series' value there.
+  const cursor = svg("line", { class: "cursor", y1: m.t, y2: H - m.b, visibility: "hidden" });
+  const marks = opts.series.map((s) => svg("circle", { r: 4, fill: s.color, stroke: "var(--panel)",
+                                                        "stroke-width": 2, visibility: "hidden" }));
+  const hit = svg("rect", { x: m.l, y: m.t, width: W - m.l - m.r, height: H - m.t - m.b, fill: "transparent" });
+  root.append(cursor, ...marks, hit);
+  const tip = el("div", "tip");
+  tip.hidden = true;
+  box.append(tip);
+  const lookups = opts.series.map((s) => new Map(s.values));
+  const hide = () => {
+    tip.hidden = true;
+    [cursor, ...marks].forEach((n) => n.setAttribute("visibility", "hidden"));
+  };
+  hit.addEventListener("pointerleave", hide);
+  hit.addEventListener("pointermove", (ev) => {
+    const rect = root.getBoundingClientRect();
+    const px = (ev.clientX - rect.left) * W / rect.width;
+    const at = t0 + (px - m.l) / (W - m.l - m.r) * (t1 - t0) - half;
+    const t = Math.round(at / opts.bucket) * opts.bucket;
+    const values = lookups.map((l) => l.get(t));
+    if (values.every((v) => v == null)) return hide();
+    cursor.setAttribute("x1", x(t));
+    cursor.setAttribute("x2", x(t));
+    cursor.setAttribute("visibility", "visible");
+    tip.replaceChildren(el("div", "when", stamp(t, false).slice(5, opts.bucket < 60 ? 19 : 16)));
+    opts.series.forEach((s, i) => {
+      const shown = values[i] != null;
+      marks[i].setAttribute("visibility", shown ? "visible" : "hidden");
+      if (!shown) return;
+      marks[i].setAttribute("cx", x(t));
+      marks[i].setAttribute("cy", y(values[i]));
+      const row = el("div", "num");
+      if (opts.series.length > 1) {
+        const swatch = el("i");
+        swatch.style.background = s.color;
+        row.append(swatch, s.name + " ");
+      }
+      row.append(el("b", "", fmt(values[i])));
+      tip.append(row);
+    });
+    tip.hidden = false;
+    const left = x(t) * rect.width / W;
+    tip.style.left = (left > rect.width / 2 ? left - tip.offsetWidth - 10 : left + 10) + "px";
+  });
+}
+
+// ---- monitoring tab ----------------------------------------------------
+
+const CHARTS = [
+  { title: "CPU", hint: "Percent of one core, whole process tree",
+    fmt: fmtCpu, series: [["cpu", "CPU", 1]] },
+  { title: "Memory", hint: "Resident memory, whole process tree",
+    fmt: (v) => fmtBytes(v * 1048576), series: [["rss", "Memory", 1048576]] },
+  { title: "Threads", hint: "Across all processes of the script", series: [["threads", "Threads", 1]] },
+  { title: "Open files", hint: "File descriptors across all processes", series: [["fds", "Open files", 1]] },
+  { title: "Log output", hint: "Lines per minute", perMinute: true,
+    series: [["out_lines", "stdout", 1], ["err_lines", "stderr", 1]] },
+];
+const COLORS = ["var(--series-1)", "var(--series-2)"];
+const monitorTiles = {};
+const chartBoxes = [];
+
+function buildMonitor() {
+  for (const [label, seconds] of RANGES) {
+    const b = el("button", "", label);
+    b.dataset.range = seconds;
+    b.onclick = () => { monitorRange = seconds; loadMonitor(); };
+    $("ranges").append(b);
+  }
+  Object.assign(monitorTiles, {
+    cpu: tile("CPU"), mem: tile("Memory"), threads: tile("Threads"), fds: tile("Open files"),
+    runs: tile("Runs"), lines: tile("Log lines"),
+  });
+  $("montiles").style.gridTemplateColumns = "repeat(auto-fit, minmax(110px, 1fr))";
+  $("montiles").append(...Object.values(monitorTiles).map((t) => t.box));
+  for (const spec of CHARTS) {
+    const panel = el("div", "panel"), box = el("div", "chart");
+    panel.append(el("h3", "", spec.title), el("div", "hint", spec.hint));
+    if (spec.series.length > 1) {
+      const legend = el("div", "legend");
+      spec.series.forEach(([, name], i) => {
+        const item = el("span"), swatch = el("i");
+        swatch.style.background = COLORS[i];
+        item.append(swatch, name);
+        legend.append(item);
+      });
+      panel.append(legend);
+    }
+    panel.append(box);
+    $("charts").append(panel);
+    chartBoxes.push(box);
+  }
+}
+
+function drawMonitor() {
+  const data = monitorData;
+  if (!data || route.view !== "monitor") return;
+  fillHistoryTiles(monitorTiles, data, rangeLabel(monitorRange));
+  CHARTS.forEach((spec, i) => {
+    const scale = spec.perMinute ? data.bucket / 60 : 1;
+    drawChart(chartBoxes[i], {
+      ...data, fmt: spec.fmt,
+      series: spec.series.map(([key, name, div], n) => ({
+        name, color: COLORS[n],
+        values: data.points.map((p) => [p.t, p[key] == null ? null : p[key] / div / scale]),
+      })),
+    });
+  });
+}
+
+function runResult(r) {
+  if (r.ended == null) return ["running", ""];
+  if (r.note === "stopped") return ["stopped on request", ""];
+  if (r.note === "interrupted") return ["interrupted (scriptrunner stopped)", ""];
+  if (r.exit_code == null) return ["could not start: " + (r.note || "unknown reason"), "bad"];
+  if (r.exit_code === 0) return ["exit 0", ""];
+  return [r.exit_code < 0 ? `killed (signal ${-r.exit_code})` : `exit ${r.exit_code}`, "bad"];
+}
+
+async function loadMonitor() {
+  if (route.view !== "monitor") return;
+  const name = route.name, range = monitorRange;
+  document.querySelectorAll("#ranges button").forEach((b) =>
+    b.classList.toggle("active", Number(b.dataset.range) === range));
+  try {
+    const [metrics, runs] = await Promise.all([
+      api(scriptUrl(name, `metrics?range=${range}&points=180`)),
+      api(scriptUrl(name, "runs?limit=30")),
+    ]);
+    if (route.view !== "monitor" || route.name !== name || monitorRange !== range) return;
+    monitorData = metrics;
+    drawMonitor();
+    const now = Date.now() / 1000;
+    $("runsummary").textContent = runs.runs.length ? "Newest first" : "No runs recorded yet";
+    $("runs").replaceChildren(...runs.runs.map((r) => {
+      const row = el("tr"), [text, cls] = runResult(r);
+      row.append(el("td", "num", stamp(r.started, false)),
+                 el("td", "num", ago((r.ended ?? now) - r.started)), el("td", cls, text));
+      return row;
+    }));
+  } catch (err) { /* the status poll reports connection problems */ }
+}
+
+// ---- log tab -----------------------------------------------------------
+
+function logUrl(extra) {
+  const params = new URLSearchParams({ limit: PAGE, ...extra });
+  const q = $("filter").value.trim();
+  if (q) params.set("q", q);
+  const streams = [...document.querySelectorAll(".stream")];
+  if (!streams.every((c) => c.checked))
+    params.set("streams", streams.filter((c) => c.checked).map((c) => c.value).join(","));
+  return scriptUrl(route.name, `logs?${params}`);
+}
+
+function lineNode(l) {
+  const row = el("div", "line " + l.stream);
+  row.append(el("span", "ts", stamp(l.ts)), el("span", "tag", l.stream.padEnd(6)), el("span", "txt", l.line));
+  return row;
+}
+
+async function resetLog() {
+  const mine = ++view;
+  loaded = false;
+  firstId = lastId = null;
+  $("lines").replaceChildren();
+  $("older").hidden = true;
+  if (route.view !== "logs") return;
+  if (document.querySelectorAll(".stream:checked").length === 0) return;
+  try {
+    const { lines } = await api(logUrl({}));
+    if (mine !== view) return;
+    loaded = true;
+    $("lines").append(...lines.map(lineNode));
+    if (lines.length) { firstId = lines[0].id; lastId = lines[lines.length - 1].id; }
+    $("older").hidden = lines.length < PAGE;
+    $("log").scrollTop = $("log").scrollHeight;
+  } catch (err) { showError(err); }
+}
+
+async function tail() {
+  if (route.view !== "logs" || !loaded || tailBusy ||
+      document.querySelectorAll(".stream:checked").length === 0) return;
+  tailBusy = true;
+  const mine = view;
+  try {
+    for (;;) {
+      const { lines } = await api(logUrl({ after: lastId ?? 0 }));
+      if (mine !== view) break;
+      if (lines.length) {
+        const box = $("lines");
+        box.append(...lines.map(lineNode));
+        lastId = lines[lines.length - 1].id;
+        if (firstId === null) firstId = lines[0].id;
+        if ($("follow").checked) {
+          while (box.childElementCount > MAX_DOM_LINES) box.firstElementChild.remove();
+          $("log").scrollTop = $("log").scrollHeight;
+        }
+      }
+      if (lines.length < PAGE) break;
+    }
+  } catch (err) { /* the status poll reports connection problems */ }
+  tailBusy = false;
+}
+
+$("older").onclick = async () => {
+  if (firstId === null) return;
+  const mine = view;
+  try {
+    const { lines } = await api(logUrl({ before: firstId }));
+    if (mine !== view) return;
+    const log = $("log"), heightBefore = log.scrollHeight;
+    $("lines").prepend(...lines.map(lineNode));
+    if (lines.length) firstId = lines[0].id;
+    $("older").hidden = lines.length < PAGE;
+    log.scrollTop += log.scrollHeight - heightBefore;  // keep the same lines in view
+  } catch (err) { showError(err); }
+};
+
+let filterTimer;
+$("filter").addEventListener("input", () => {
+  clearTimeout(filterTimer);
+  filterTimer = setTimeout(resetLog, 250);
+});
+document.querySelectorAll(".stream").forEach((c) => c.addEventListener("change", resetLog));
+$("follow").addEventListener("change", () => {
+  if ($("follow").checked) $("log").scrollTop = $("log").scrollHeight;
+});
+
+// ---- routing and refresh -----------------------------------------------
+
+// "#/" is the overview; "#/s/<name>/logs" and "#/s/<name>/monitor" are a script's tabs.
+function parseRoute() {
+  const parts = location.hash.replace(/^#\/?/, "").split("/").map(decodeURIComponent);
+  if (parts[0] === "s" && parts[1]) return { view: parts[2] === "monitor" ? "monitor" : "logs", name: parts[1] };
+  return { view: "overview" };
+}
+
+function renderScriptHead() {
+  const s = scripts.find((x) => x.name === route.name);
+  $("title").textContent = route.name;
+  if (!s) return;
+  $("scripthead").className = "scripthead s-" + s.state;
+  $("headstate").textContent = s.state;
+  fillDetail($("headdetail"), s, Date.now() / 1000);
+  fillActions($("headactions"), s);
+  fillUsageTiles(monitorTiles, s);
+}
+
+function applyRoute() {
+  route = parseRoute();
+  const onScript = route.view !== "overview";
+  $("overview").hidden = onScript;
+  $("script").hidden = !onScript;
+  if (!onScript) {
+    renderOverview();
+    refreshOverviewMetrics();
+    scripts.forEach((s) => drawOverviewCharts(s.name));  // widths may have changed while hidden
+    return;
+  }
+  const base = `#/s/${encodeURIComponent(route.name)}/`;
+  $("tab-logs").href = base + "logs";
+  $("tab-monitor").href = base + "monitor";
+  $("tab-logs").classList.toggle("active", route.view === "logs");
+  $("tab-monitor").classList.toggle("active", route.view === "monitor");
+  $("logs").hidden = route.view !== "logs";
+  $("monitor").hidden = route.view !== "monitor";
+  delete $("headactions").dataset.key;
+  renderScriptHead();
+  resetLog();
+  if (route.view === "monitor") {
+    monitorData = null;
+    loadMonitor();
+  }
+}
+
+async function refreshScripts() {
+  try {
+    scripts = (await api("/api/scripts")).scripts;
+    showError(null);
+  } catch (err) {
+    showError("Cannot reach scriptrunner: " + (err.message || err));
+    return;
+  }
+  if (route.view === "overview") renderOverview();
+  else if (scripts.some((s) => s.name === route.name)) renderScriptHead();
+  else location.hash = "#/";   // the script no longer exists
+}
+
+let resizeTimer;
+window.addEventListener("resize", () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => {
+    if (route.view === "overview") scripts.forEach((s) => drawOverviewCharts(s.name));
+    else drawMonitor();
+  }, 150);
+});
+window.addEventListener("hashchange", applyRoute);
+
+buildMonitor();
+refreshScripts().then(applyRoute);
+setInterval(refreshScripts, 2000);
+setInterval(tail, 1500);
+setInterval(() => { refreshOverviewMetrics(); loadMonitor(); }, 10000);
+</script>
+</body>
+</html>

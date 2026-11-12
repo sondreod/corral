@@ -1,0 +1,26 @@
+[Unit]
+Description=scriptrunner - supervised PEP 723 scripts with a web interface
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=scriptrunner
+Group=scriptrunner
+ExecStart=/usr/bin/scriptrunner --config /etc/scriptrunner/config.toml
+Restart=always
+RestartSec=3
+
+# /var/lib/scriptrunner (logs, home directory) and /var/cache/scriptrunner
+# (uv's cache of script environments), both owned by the service user.
+StateDirectory=scriptrunner
+CacheDirectory=scriptrunner
+Environment=HOME=/var/lib/scriptrunner
+Environment=UV_CACHE_DIR=/var/cache/scriptrunner/uv
+
+# scriptrunner stops its scripts itself on SIGTERM; anything still alive
+# after the timeout is killed.
+KillMode=mixed
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

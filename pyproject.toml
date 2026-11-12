@@ -1,0 +1,20 @@
+[project]
+name = "scriptrunner"
+version = "0.1.0"
+description = "Runs PEP 723 scripts under supervision, with a web view of their status and logs"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+scriptrunner = "scriptrunner.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["uv_build>=0.13.1,<0.14.0"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

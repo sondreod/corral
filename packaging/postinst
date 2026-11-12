@@ -1,0 +1,14 @@
+#!/bin/sh
+set -e
+
+if [ "$1" = "configure" ]; then
+    if ! getent passwd scriptrunner >/dev/null; then
+        adduser --system --group --quiet \
+            --home /var/lib/scriptrunner --no-create-home scriptrunner
+    fi
+    systemctl enable scriptrunner.service >/dev/null 2>&1 || true
+    if [ -d /run/systemd/system ]; then
+        systemctl daemon-reload || true
+        systemctl restart scriptrunner.service || true
+    fi
+fi

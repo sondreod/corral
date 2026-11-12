@@ -1,0 +1,14 @@
+#!/bin/sh
+set -e
+
+if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload || true
+fi
+
+if [ "$1" = "purge" ]; then
+    rm -rf /var/lib/scriptrunner /var/cache/scriptrunner
+    rmdir /etc/scriptrunner/scripts /etc/scriptrunner 2>/dev/null || true
+    if getent passwd scriptrunner >/dev/null; then
+        deluser --system --quiet scriptrunner || true
+    fi
+fi
