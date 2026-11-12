@@ -71,9 +71,18 @@ source = { editable = "." }
 [package.dev-dependencies]
 dev = [
     { name = "pytest" },
+    { name = "scriptrunner-metrics" },
 ]
 
 [package.metadata]
 
 [package.metadata.requires-dev]
-dev = [{ name = "pytest", specifier = ">=8" }]
+dev = [
+    { name = "pytest", specifier = ">=8" },
+    { name = "scriptrunner-metrics", editable = "client" },
+]
+
+[[package]]
+name = "scriptrunner-metrics"
+version = "0.1.0"
+source = { editable = "client" }

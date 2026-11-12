@@ -1,5 +1,6 @@
 """The web interface: one static page plus a small JSON API.
 
+    GET  /metrics                          Prometheus metrics (see ``prometheus``)
     GET  /api/scripts                      status of every script
     GET  /api/scripts/<name>/logs          log lines (see ``_logs`` for parameters)
     GET  /api/scripts/<name>/metrics       resource history (see ``_metrics``)
@@ -16,6 +17,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
 from urllib.parse import parse_qs, unquote, urlsplit
 
+from . import prometheus
 from .monitor import Monitor
 from .store import STREAMS, LogStore
 from .supervisor import Supervisor
@@ -76,6 +78,9 @@ class Handler(BaseHTTPRequestHandler):
             if method == "GET" and not parts:
                 page = resources.files("scriptrunner").joinpath("static/index.html").read_bytes()
                 self._send(HTTPStatus.OK, page, "text/html; charset=utf-8")
+            elif method == "GET" and parts == ["metrics"]:
+                text = prometheus.render(self.supervisor, self.monitor)
+                self._send(HTTPStatus.OK, text.encode(), prometheus.CONTENT_TYPE)
             elif method == "GET" and parts == ["api", "scripts"]:
                 self._json({"scripts": [self._status(s) for s in self.supervisor.scripts.values()]})
             elif len(parts) == 4 and parts[:2] == ["api", "scripts"]:

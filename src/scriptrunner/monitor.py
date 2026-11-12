@@ -105,6 +105,7 @@ class Monitor:
         self._latest: dict[str, dict] = {}
         # Per script: (time of the previous sample, {pid: cpu ticks}).
         self._previous: dict[str, tuple[float, dict[int, int]]] = {}
+        self._cpu_seconds: dict[str, float] = {}
         self._thread = threading.Thread(target=self._loop, name="monitor", daemon=True)
 
     def start(self) -> None:
@@ -119,6 +120,12 @@ class Monitor:
         """The most recent measurement of a running script."""
         with self._lock:
             return self._latest.get(name)
+
+    def cpu_seconds(self, name: str) -> float:
+        """CPU time the script's processes have used since the runner started,
+        as far as the samples saw it."""
+        with self._lock:
+            return self._cpu_seconds.get(name, 0.0)
 
     def _loop(self) -> None:
         next_prune = 0.0
@@ -161,11 +168,14 @@ class Monitor:
         ticks = {info.pid: info.ticks for info in tree}
         cpu = None
         previous = self._previous.get(name)
+        # Per-process differences, so a child that exited does not make the
+        # total go backwards. A new process contributes all its time.
+        seen = previous[1] if previous is not None else {}
+        used = sum(max(0, t - seen.get(pid, 0)) for pid, t in ticks.items())
         if previous is not None and now > previous[0]:
-            # Per-process differences, so a child that exited does not make
-            # the total go backwards. A new process contributes all its time.
-            used = sum(max(0, t - previous[1].get(pid, 0)) for pid, t in ticks.items())
             cpu = round(100.0 * used / _TICKS_PER_SECOND / (now - previous[0]), 2)
+        with self._lock:
+            self._cpu_seconds[name] = self._cpu_seconds.get(name, 0.0) + used / _TICKS_PER_SECOND
         self._previous[name] = (now, ticks)
         return {
             "cpu": cpu,

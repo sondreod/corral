@@ -38,6 +38,17 @@ install -d "$root/$demo/src/demo_project"
 install -m 644 examples/demo-project/pyproject.toml "$root/$demo/"
 install -m 644 examples/demo-project/src/demo_project/*.py "$root/$demo/src/demo_project/"
 install -m 644 README.md "$root/usr/share/doc/scriptrunner/"
+
+# The scriptrunner-metrics library, as source that scripts name as a path
+# dependency. The examples refer to it relative to the checkout; point them
+# at the installed copy.
+client=usr/share/scriptrunner/client
+install -d "$root/$client/src/scriptrunner_metrics"
+install -m 644 client/pyproject.toml client/README.md "$root/$client/"
+install -m 644 client/src/scriptrunner_metrics/*.py "$root/$client/src/scriptrunner_metrics/"
+sed -i 's|path = "\(\.\./\)*client"|path = "/usr/share/scriptrunner/client"|' \
+    "$root/usr/share/doc/scriptrunner/examples/report.py" "$root/$demo/pyproject.toml"
+grep -q "/$client" "$root/usr/share/doc/scriptrunner/examples/report.py" "$root/$demo/pyproject.toml"
 install -m 755 packaging/postinst packaging/prerm packaging/postrm "$root/DEBIAN/"
 echo /etc/scriptrunner/config.toml > "$root/DEBIAN/conffiles"
 

@@ -110,6 +110,110 @@ not running. Memory is a sum of per-process figures, so pages shared between
 processes are counted more than once. On systems without `/proc` the resource
 charts stay empty; runs and log output are still recorded.
 
+## Prometheus metrics
+
+`GET /metrics` serves the runner's own figures in the Prometheus text format,
+one series per script (label `script`):
+
+| Metric | Type | Meaning |
+| --- | --- | --- |
+| `scriptrunner_script_state{state=…}` | gauge | 1 for the current state (`stopped`, `starting`, `running`, `stopping`, `backoff`, `waiting`), 0 for the others |
+| `scriptrunner_script_up` | gauge | 1 while the script has a process |
+| `scriptrunner_script_enabled` | gauge | 0 after Stop/Disable |
+| `scriptrunner_script_runs_total` | counter | starts |
+| `scriptrunner_script_run_failures_total` | counter | runs that could not start or exited non-zero (requested stops excluded) |
+| `scriptrunner_script_log_lines_total{stream=…}` | counter | lines printed on `stdout` / `stderr` |
+| `scriptrunner_script_cpu_seconds_total` | counter | CPU time of the process tree |
+| `scriptrunner_script_resident_memory_bytes`, `…_threads`, `…_open_fds` | gauge | as on the dashboard; absent while not running |
+| `scriptrunner_script_last_exit_code` | gauge | absent until a run has finished |
+| `scriptrunner_script_last_start_time_seconds`, `…_last_exit_time_seconds`, `…_next_run_time_seconds` | gauge | Unix times |
+| `scriptrunner_build_info{version=…}` | gauge | always 1 |
+
+Counters start at zero when the runner starts. CPU, memory, threads and open
+files come from the most recent sample, so they lag by up to
+`sample_interval`; CPU used by a process that starts and exits between two
+samples is not seen. A scrape job:
+
+```yaml
+scrape_configs:
+  - job_name: scriptrunner
+    static_configs:
+      - targets: ["127.0.0.1:8723"]
+```
+
+For example, `rate(scriptrunner_script_cpu_seconds_total[1m])` is CPU use in
+cores, and `increase(scriptrunner_script_run_failures_total[1h]) > 0` finds
+scripts that failed in the last hour.
+
+### Metrics from your scripts
+
+Scripts can report their own metrics, which appear on the same `/metrics`
+page with a `script` label added. In Python, use the `scriptrunner-metrics`
+library in [`client/`](client/README.md); it has no dependencies and works
+like `prometheus_client`:
+
+```python
+# /// script
+# dependencies = ["scriptrunner-metrics"]
+#
+# [tool.uv.sources]
+# scriptrunner-metrics = { path = "/usr/share/scriptrunner/client" }
+# ///
+from scriptrunner_metrics import Counter, Gauge, Histogram
+
+JOBS = Counter("jobs_processed", "Jobs processed", ["queue"])
+DEPTH = Gauge("queue_depth", "Jobs waiting")
+DURATION = Histogram("job_duration_seconds", "Time spent per job")
+
+JOBS.labels(queue="mail").inc()
+DEPTH.set(12)
+with DURATION.time():
+    ...
+```
+
+The Debian package installs the library's source in
+`/usr/share/scriptrunner/client`; from a checkout, point the path at the
+`client` directory (as [`examples/report.py`](examples/report.py) does). A
+project names it the same way in its `pyproject.toml`: in `dependencies`,
+with the path under `[tool.uv.sources]`.
+
+There are `Counter` (`inc`, `count_exceptions`), `Gauge` (`set`, `inc`,
+`dec`, `set_to_current_time`, `time`), `Histogram` and `Summary` (`observe`,
+`time`), each with `.labels(...)`. What differs from `prometheus_client`:
+
+- **The runner holds the values, not the script.** A counter keeps counting
+  across runs of a scheduled script, and a gauge keeps its last value after
+  the script exits. Everything starts again when the runner restarts.
+- A counter is exposed with `_total` added to its name if it is missing.
+- A `Summary` has `_count` and `_sum` only, no quantiles.
+- Run by hand, outside scriptrunner, the calls do nothing (set
+  `SCRIPTRUNNER_METRICS=1` to see what would be sent).
+
+Under the hood each call prints one line on standard output, `@metric`
+followed by a JSON object, so any program can report metrics without the
+library:
+
+```
+@metric {"name": "jobs_processed", "op": "declare", "type": "counter", "help": "Jobs processed"}
+@metric {"name": "jobs_processed", "op": "inc", "value": 1, "labels": {"queue": "mail"}}
+@metric {"name": "queue_depth", "op": "set", "value": 12}
+@metric {"name": "job_duration_seconds", "op": "observe", "value": 0.31}
+```
+
+`op` is `declare` (with `type`: `counter`, `gauge`, `histogram` or
+`summary`; optional `help`, and `buckets` for a histogram), `inc` (counter
+or gauge; `value` defaults to 1), `set` (gauge) or `observe` (histogram or
+summary). A metric that was not declared gets its type from the first
+operation: `inc` makes a counter, `set` a gauge, `observe` a histogram.
+
+Metric lines are not stored as log lines and do not count towards log
+volume. A line the runner cannot use is reported in the script's log (the
+first ten per run). A line only counts if `@metric` is at its very start, so
+finish any partial line before reporting. Names starting with
+`scriptrunner_` and the label `script` are reserved, and a script is limited
+to 2000 series. If two scripts use the same name for different types, the
+second one is left out and noted in a comment at the end of `/metrics`.
+
 ## Development
 
 ```sh

@@ -15,6 +15,8 @@ import time
 from datetime import datetime
 
 from .config import Config, ScriptConfig
+from .custom import PREFIX as METRIC_PREFIX
+from .custom import MetricError, ScriptMetrics
 from .project import ProjectError, project_command
 from .store import LogStore
 
@@ -22,6 +24,7 @@ from .store import LogStore
 # delay before the next attempt doubles (up to ``max_restart_delay``).
 QUICK_EXIT_SECONDS = 10.0
 _MAX_LINE_BYTES = 64 * 1024
+_MAX_METRIC_COMPLAINTS = 10  # per run
 
 
 class Script:
@@ -48,7 +51,11 @@ class Script:
         self._quick_exits = 0
         self._stop_requested = False  # the current run was asked to stop
         self._line_counts = {"stdout": 0, "stderr": 0}
+        self._line_totals = {"stdout": 0, "stderr": 0}
+        self._failures = 0
         self._count_lock = threading.Lock()
+        self.metrics = ScriptMetrics()  # what the script reports with "@metric" lines
+        self._metric_complaints = 0
 
         self._thread = threading.Thread(target=self._loop, name=f"script-{cfg.name}", daemon=True)
 
@@ -108,6 +115,13 @@ class Script:
             counts = self._line_counts["stdout"], self._line_counts["stderr"]
             self._line_counts = {"stdout": 0, "stderr": 0}
         return counts
+
+    def counters(self) -> dict:
+        """Totals since the runner started; they only ever go up."""
+        with self._lock:
+            runs, failures = self._runs, self._failures
+        with self._count_lock:
+            return {"runs": runs, "failures": failures, "lines": dict(self._line_totals)}
 
     def status(self) -> dict:
         cfg = self.cfg
@@ -208,13 +222,16 @@ class Script:
                 with self._lock:
                     self._proc = None
                     self._quick_exits += 1
+                    self._failures += 1
             with self._lock:
                 self._wait_since = time.time()
 
     def _run_once(self, gen: int) -> None:
         cfg = self.cfg
         cmd = None
-        env = {**os.environ, "PYTHONUNBUFFERED": "1", **cfg.env}
+        # SCRIPTRUNNER_METRICS tells the scriptrunner-metrics library that
+        # someone is listening for its "@metric" lines.
+        env = {**os.environ, "PYTHONUNBUFFERED": "1", "SCRIPTRUNNER_METRICS": "1", **cfg.env}
         started = time.time()
         with self._lock:
             self._state = "starting"
@@ -223,6 +240,7 @@ class Script:
             self._exited_at = None
             self._runs += 1
             self._stop_requested = False
+        self._metric_complaints = 0
         self._store.run_started(cfg.name, started)
         try:
             cmd = self._command()
@@ -242,6 +260,7 @@ class Script:
                 self._exited_at = time.time()
                 self._exit_code = None
                 self._quick_exits += 1
+                self._failures += 1
             return
 
         self._log(f"started (pid {proc.pid})")
@@ -280,6 +299,8 @@ class Script:
             self._proc = None
             self._exited_at = ended
             self._exit_code = code
+            if code != 0 and note is None:
+                self._failures += 1
             if ended - started < QUICK_EXIT_SECONDS:
                 self._quick_exits += 1
             else:
@@ -300,11 +321,23 @@ class Script:
                 self._ingest(stream, raw.decode("utf-8", "replace").rstrip("\r\n"))
 
     def _ingest(self, stream: str, line: str) -> None:
-        """Every line a script prints passes through here; this is the place
-        to recognise specially formatted lines (such as metrics) later."""
+        """Every line a script prints passes through here. Metric lines are
+        applied and not kept as log lines."""
+        if line.startswith(METRIC_PREFIX):
+            try:
+                self.metrics.handle(line[len(METRIC_PREFIX):])
+            except MetricError as exc:
+                self._metric_complaints += 1
+                if self._metric_complaints <= _MAX_METRIC_COMPLAINTS:
+                    shown = line if len(line) <= 200 else line[:200] + "…"
+                    self._log(f"ignored metric line ({exc}): {shown}")
+                if self._metric_complaints == _MAX_METRIC_COMPLAINTS:
+                    self._log("further invalid metric lines in this run are not reported")
+            return
         self._store.append(self.cfg.name, stream, line)
         with self._count_lock:
             self._line_counts[stream] += 1
+            self._line_totals[stream] += 1
 
 
 def _signal_group(proc: subprocess.Popen, sig: int) -> None:
