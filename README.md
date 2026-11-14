@@ -81,6 +81,11 @@ the script's log (`runner` stream) and are retried like a failed start.
 
 The web interface has no authentication. It listens on localhost by default;
 put it behind a reverse proxy or an SSH tunnel to reach it from elsewhere.
+While it listens on localhost it only answers requests addressed to a
+localhost name or loopback address, so a web page cannot reach it by pointing
+a domain of its own at 127.0.0.1. A reverse proxy that passes on its own host
+name needs that name in `allowed_hosts` under `[server]` (`["*"]` turns the
+check off).
 
 ## Logs
 

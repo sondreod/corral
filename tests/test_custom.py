@@ -88,6 +88,10 @@ def test_redeclaring_keeps_values_unless_the_type_changes():
         ('{"name": "x", "op": "set", "type": "counter", "value": 1}', "cannot set a counter"),
         ('{"name": "x", "op": "inc", "labels": {"script": "a"}}', "label name"),
         ('{"name": "x", "op": "inc", "labels": {"a": [1]}}', "string or number"),
+        ('{"name": "x", "op": "set", "value": 1' + "0" * 400 + "}", "too large"),
+        ('{"name": "x", "op": "set", "value": 1e999}', "finite number"),
+        ('{"name": "x", "op": "set", "value": NaN}', "finite number"),
+        ("[" * 100_000, "nested too deeply"),
     ],
 )
 def test_invalid_lines(text, reason):
@@ -255,3 +259,27 @@ def test_scripts_disagreeing_about_a_type():
         'rows{script="c"} 3',
         "# scriptrunner: left out rows (histogram) from script b: name in use",
     ]
+
+
+def test_counter_overflowing_to_infinity_is_still_valid_output():
+    m = ScriptMetrics()
+    send(m, name="big", op="inc", value=1e308)
+    send(m, name="big", op="inc", value=1e308)
+    assert prometheus._number(samples(m)[("big_total", ())]) == "+Inf"
+
+
+def test_bad_metric_lines_do_not_stop_the_output(tmp_path, harness):  # noqa: F811
+    huge = '{"name": "x", "op": "set", "value": 1' + "0" * 400 + "}"
+    body = (
+        "import time\n"
+        "print('before', flush=True)\n"
+        f"print('@metric ' + {huge!r}, flush=True)\n"
+        "print('@metric ' + '[' * 60000, flush=True)\n"
+        "print('after', flush=True)\n"
+        "time.sleep(60)\n"
+    )
+    _, store = harness(script(tmp_path, "s", body))
+    wait_for(lambda: logged(store, "s", "stdout") == ["before", "after"])
+    complaints = [line for line in logged(store, "s", "runner") if "ignored metric line" in line]
+    assert len(complaints) == 2 and "too large" in complaints[0]
+    assert not [line for line in logged(store, "s", "runner") if "internal error" in line]

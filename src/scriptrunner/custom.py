@@ -47,9 +47,15 @@ class MetricError(ValueError):
 
 
 def _finite(value, what: str) -> float:
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise MetricError(f"{what} must be a finite number")
-    return float(value)
+    try:
+        value = float(value)  # an int of a few hundred digits does not fit
+    except OverflowError:
+        raise MetricError(f"{what} is too large") from None
+    if not math.isfinite(value):
+        raise MetricError(f"{what} must be a finite number")
+    return value
 
 
 class _Metric:
@@ -76,6 +82,8 @@ class ScriptMetrics:
             message = json.loads(text)
         except ValueError:
             raise MetricError("not valid JSON") from None
+        except RecursionError:
+            raise MetricError("JSON nested too deeply") from None
         if not isinstance(message, dict):
             raise MetricError("expected a JSON object")
         unknown = set(message) - {"name", "op", "type", "help", "buckets", "value", "labels"}

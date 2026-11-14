@@ -7,6 +7,12 @@
 # the host to something reachable from other machines if you trust the network.
 host = "127.0.0.1"
 port = 8723
+# Host names the web interface answers to, besides localhost and loopback
+# addresses. Needed for a reverse proxy that passes on its own host name
+# (nginx: proxy_set_header Host $host). Listening on localhost, other names
+# are refused, which stops web pages from reaching the interface through DNS
+# rebinding. ["*"] answers to any name.
+# allowed_hosts = ["scripts.example.com"]
 
 [runner]
 # Where the log database lives.

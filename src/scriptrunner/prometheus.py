@@ -9,6 +9,8 @@ while the script is running.
 
 from __future__ import annotations
 
+import math
+
 from . import __version__
 from .monitor import Monitor
 from .supervisor import Supervisor
@@ -28,7 +30,12 @@ def _labels(labels: dict[str, str]) -> str:
 
 
 def _number(value: float) -> str:
-    return str(int(value)) if float(value).is_integer() else repr(float(value))
+    value = float(value)
+    if math.isnan(value):
+        return "NaN"
+    if math.isinf(value):  # a counter can add up past the largest float
+        return "+Inf" if value > 0 else "-Inf"
+    return str(int(value)) if value.is_integer() else repr(value)
 
 
 class _Family:

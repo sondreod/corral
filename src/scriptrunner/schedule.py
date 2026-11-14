@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 from datetime import datetime, timedelta
 
@@ -17,6 +18,8 @@ def parse_duration(value) -> float:
         seconds = float(m.group(1)) * _UNITS[m.group(2) or "s"]
     else:
         raise ValueError(f"invalid duration {value!r} (use e.g. 30, \"30s\", \"5m\", \"1h\")")
+    if not math.isfinite(seconds):
+        raise ValueError("duration must be a finite number")
     if seconds <= 0:
         raise ValueError("duration must be positive")
     return seconds

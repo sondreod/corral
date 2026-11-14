@@ -10,8 +10,10 @@
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import time
+from collections.abc import Callable
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
@@ -30,6 +32,43 @@ MAX_RANGE = 90 * 86400
 # this server never approves, so requiring one stops other websites from
 # pressing the buttons on behalf of someone who has the page reachable.
 CSRF_HEADER = "X-Scriptrunner"
+
+
+def _host_name(header: str) -> str:
+    """The host part of a Host header, lower-cased, without port or brackets."""
+    header = header.strip().lower()
+    if header.startswith("["):
+        return header[1:].partition("]")[0]
+    if header.count(":") == 1:
+        return header.partition(":")[0]
+    return header
+
+
+def _is_loopback(name: str) -> bool:
+    if name == "localhost" or name.endswith(".localhost"):
+        return True
+    try:
+        return ipaddress.ip_address(name).is_loopback
+    except ValueError:
+        return False
+
+
+def host_filter(bind_host: str, allowed_hosts=()) -> Callable[[str], bool] | None:
+    """Which Host headers to answer, or None for any.
+
+    A server listening only on loopback is reachable only from this machine,
+    but a web page in a local browser can still point a host name of its own
+    at 127.0.0.1 (DNS rebinding) and then read the API as a same-origin page.
+    So it only answers to loopback names, plus ``allowed_hosts`` (for a reverse
+    proxy that passes on its own host name). ``"*"`` turns the check off; so
+    does listening on another address, unless ``allowed_hosts`` is given.
+    """
+    allowed = {h.strip().lower() for h in allowed_hosts}
+    if "*" in allowed:
+        return None
+    if not allowed and not _is_loopback(_host_name(bind_host)):
+        return None
+    return lambda header: (name := _host_name(header)) in allowed or _is_loopback(name)
 
 
 class _Error(Exception):
@@ -53,6 +92,7 @@ class Handler(BaseHTTPRequestHandler):
     supervisor: Supervisor
     store: LogStore
     monitor: Monitor | None
+    host_ok: Callable[[str], bool] | None = None
 
     def log_message(self, format, *args):  # keep the journal quiet
         pass
@@ -75,6 +115,12 @@ class Handler(BaseHTTPRequestHandler):
         url = urlsplit(self.path)
         parts = [unquote(p) for p in url.path.split("/") if p]
         try:
+            host = self.headers.get("Host")
+            if self.host_ok is not None and host is not None and not self.host_ok(host):
+                raise _Error(
+                    HTTPStatus.FORBIDDEN,
+                    f"this server does not answer to the host name {host!r}; add it to allowed_hosts",
+                )
             if method == "GET" and not parts:
                 page = resources.files("scriptrunner").joinpath("static/index.html").read_bytes()
                 self._send(HTTPStatus.OK, page, "text/html; charset=utf-8")
@@ -163,10 +209,20 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def make_server(
-    host: str, port: int, supervisor: Supervisor, store: LogStore, monitor: Monitor | None = None
+    host: str,
+    port: int,
+    supervisor: Supervisor,
+    store: LogStore,
+    monitor: Monitor | None = None,
+    allowed_hosts=(),
 ) -> ThreadingHTTPServer:
+    check = host_filter(host, allowed_hosts)
     handler = type(
-        "BoundHandler", (Handler,), {"supervisor": supervisor, "store": store, "monitor": monitor}
+        "BoundHandler",
+        (Handler,),
+        # staticmethod, or the function would be bound to the handler instance
+        {"supervisor": supervisor, "store": store, "monitor": monitor,
+         "host_ok": staticmethod(check) if check else None},
     )
     server = ThreadingHTTPServer((host, port), handler)
     server.daemon_threads = True

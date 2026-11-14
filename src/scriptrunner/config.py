@@ -6,6 +6,7 @@ commented example.
 
 from __future__ import annotations
 
+import math
 import re
 import tomllib
 from dataclasses import dataclass, field
@@ -55,6 +56,8 @@ class ScriptConfig:
 class Config:
     host: str = "127.0.0.1"
     port: int = 8723
+    # Host names the web interface answers to besides localhost; "*" for any.
+    allowed_hosts: tuple[str, ...] = ()
     data_dir: Path = Path("/var/lib/scriptrunner")
     uv: str = "uv"
     max_log_lines: int = 100_000
@@ -72,7 +75,23 @@ def _take(table: dict, key: str, kind, default):
         value = float(value)
     if not isinstance(value, kind) or (kind is not bool and isinstance(value, bool)):
         raise ConfigError(f"{key!r} must be of type {kind.__name__}")
+    if kind is float and not math.isfinite(value):
+        raise ConfigError(f"{key!r} must be a finite number")
     return value
+
+
+def _positive(key: str, value: float) -> float:
+    if value <= 0:
+        raise ConfigError(f"{key!r} must be positive")
+    return value
+
+
+def _table(raw: dict, key: str) -> dict:
+    value = raw.pop(key, {})
+    if not isinstance(value, dict):
+        form = f"[{key}.<name>]" if key == "scripts" else f"[{key}]"
+        raise ConfigError(f"{key!r} must be a table, written {form}")
+    return dict(value)
 
 
 def _no_leftovers(table: dict, where: str) -> None:
@@ -108,6 +127,8 @@ def _script(name: str, table: dict, base: Path) -> ScriptConfig:
     if not all(isinstance(v, str) for v in env.values()):
         raise ConfigError("'env' values must be strings")
     cwd = _take(table, "cwd", str, None)
+    if cwd == "":
+        raise ConfigError("'cwd' must not be empty")
 
     every = cron = None
     every_raw = table.pop("every", None)
@@ -125,6 +146,12 @@ def _script(name: str, table: dict, base: Path) -> ScriptConfig:
     elif every_raw is not None or cron_raw is not None:
         raise ConfigError("'every' and 'cron' are only valid with mode = \"schedule\"")
 
+    restart_delay = _positive("restart_delay", _take(table, "restart_delay", float, 2.0))
+    max_restart_delay = _positive("max_restart_delay", _take(table, "max_restart_delay", float, 60.0))
+    if max_restart_delay < restart_delay:
+        raise ConfigError("'max_restart_delay' must not be less than 'restart_delay'")
+    stop_timeout = _positive("stop_timeout", _take(table, "stop_timeout", float, 10.0))
+
     cfg = ScriptConfig(
         name=name,
         path=base / path if path else None,
@@ -135,11 +162,11 @@ def _script(name: str, table: dict, base: Path) -> ScriptConfig:
         env=env,
         cwd=base / cwd if cwd else None,
         enabled=_take(table, "enabled", bool, True),
-        restart_delay=_take(table, "restart_delay", float, 2.0),
-        max_restart_delay=_take(table, "max_restart_delay", float, 60.0),
+        restart_delay=restart_delay,
+        max_restart_delay=max_restart_delay,
         every=every,
         cron=cron,
-        stop_timeout=_take(table, "stop_timeout", float, 10.0),
+        stop_timeout=stop_timeout,
     )
     _no_leftovers(table, "script")
     return cfg
@@ -158,17 +185,29 @@ def load_config(path: str | Path) -> Config:
     # Relative paths in the file are relative to the file itself.
     base = path.resolve().parent
     try:
-        server = dict(raw.pop("server", {}))
-        runner = dict(raw.pop("runner", {}))
-        scripts_raw = raw.pop("scripts", {})
+        server = _table(raw, "server")
+        runner = _table(raw, "runner")
+        scripts_raw = _table(raw, "scripts")
         _no_leftovers(raw, "top level")
 
         host = _take(server, "host", str, "127.0.0.1")
+        if not host:
+            raise ConfigError("'host' must not be empty")
         port = _take(server, "port", int, 8723)
+        if not 1 <= port <= 65535:
+            raise ConfigError("'port' must be between 1 and 65535")
+        allowed_hosts = _take(server, "allowed_hosts", list, [])
+        if not all(isinstance(h, str) and h.strip() for h in allowed_hosts):
+            raise ConfigError("'allowed_hosts' must be a list of host names")
         _no_leftovers(server, "[server]")
 
-        data_dir = base / _take(runner, "data_dir", str, "/var/lib/scriptrunner")
+        data_dir_raw = _take(runner, "data_dir", str, "/var/lib/scriptrunner")
+        if not data_dir_raw:
+            raise ConfigError("'data_dir' must not be empty")
+        data_dir = base / data_dir_raw
         uv = _take(runner, "uv", str, "uv")
+        if not uv:
+            raise ConfigError("'uv' must not be empty")
         max_log_lines = _take(runner, "max_log_lines", int, 100_000)
         try:
             sample_interval = parse_duration(runner.pop("sample_interval", 10))
@@ -195,6 +234,7 @@ def load_config(path: str | Path) -> Config:
     return Config(
         host=host,
         port=port,
+        allowed_hosts=tuple(h.strip().lower() for h in allowed_hosts),
         data_dir=data_dir,
         uv=uv,
         max_log_lines=max_log_lines,

@@ -318,7 +318,10 @@ class Script:
     def _pump(self, pipe, stream: str) -> None:
         with pipe:
             for raw in iter(lambda: pipe.readline(_MAX_LINE_BYTES), b""):
-                self._ingest(stream, raw.decode("utf-8", "replace").rstrip("\r\n"))
+                try:
+                    self._ingest(stream, raw.decode("utf-8", "replace").rstrip("\r\n"))
+                except Exception as exc:  # one odd line must not stop the reading
+                    self._log(f"internal error handling a {stream} line: {exc!r}")
 
     def _ingest(self, stream: str, line: str) -> None:
         """Every line a script prints passes through here. Metric lines are

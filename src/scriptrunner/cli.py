@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import signal
+import sqlite3
 import sys
 import threading
 
@@ -37,11 +38,16 @@ def main(argv: list[str] | None = None) -> int:
     try:
         config.data_dir.mkdir(parents=True, exist_ok=True)
         store = LogStore(config.data_dir / "logs.sqlite3", config.max_log_lines)
-        supervisor = Supervisor(config, store)
-        monitor = Monitor(supervisor, store, config.sample_interval, config.history_days)
-        server = make_server(config.host, config.port, supervisor, store, monitor)
+    except (OSError, sqlite3.Error) as exc:
+        print(f"scriptrunner: cannot open the log database in {config.data_dir}: {exc}", file=sys.stderr)
+        return 1
+    supervisor = Supervisor(config, store)
+    monitor = Monitor(supervisor, store, config.sample_interval, config.history_days)
+    try:
+        server = make_server(config.host, config.port, supervisor, store, monitor, config.allowed_hosts)
     except OSError as exc:
-        print(f"scriptrunner: {exc}", file=sys.stderr)
+        print(f"scriptrunner: cannot listen on {config.host} port {config.port}: {exc}", file=sys.stderr)
+        store.close()
         return 1
 
     stop = threading.Event()
