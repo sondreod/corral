@@ -93,8 +93,8 @@ class ScriptMetrics:
         name, op = message.get("name"), message.get("op")
         if not isinstance(name, str) or not _NAME_RE.match(name):
             raise MetricError("name must be a valid Prometheus metric name")
-        if name.startswith("scriptrunner_"):
-            raise MetricError("names starting with scriptrunner_ are reserved for the runner")
+        if name.startswith("corral_"):
+            raise MetricError("names starting with corral_ are reserved for the runner")
         if op != "declare" and op not in _OPS:
             raise MetricError("op must be declare, inc, set or observe")
         kind = message.get("type")

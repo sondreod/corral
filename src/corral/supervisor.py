@@ -229,9 +229,9 @@ class Script:
     def _run_once(self, gen: int) -> None:
         cfg = self.cfg
         cmd = None
-        # SCRIPTRUNNER_METRICS tells scriptrunner.metrics in the script that
+        # CORRAL_METRICS tells corral.metrics in the script that
         # someone is listening for its "@metric" lines.
-        env = {**os.environ, "PYTHONUNBUFFERED": "1", "SCRIPTRUNNER_METRICS": "1", **cfg.env}
+        env = {**os.environ, "PYTHONUNBUFFERED": "1", "CORRAL_METRICS": "1", **cfg.env}
         started = time.time()
         with self._lock:
             self._state = "starting"

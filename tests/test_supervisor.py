@@ -16,10 +16,10 @@ import urllib.request
 
 import pytest
 
-from scriptrunner.config import Config, ScriptConfig
-from scriptrunner.store import LogStore
-from scriptrunner.supervisor import Supervisor
-from scriptrunner.web import make_server
+from corral.config import Config, ScriptConfig
+from corral.store import LogStore
+from corral.supervisor import Supervisor
+from corral.web import make_server
 
 
 @pytest.fixture
@@ -164,7 +164,7 @@ def test_schedule_every(tmp_path, harness):
 
 
 def test_schedule_cron_waits(tmp_path, harness):
-    from scriptrunner.schedule import Cron
+    from corral.schedule import Cron
 
     cfg = script(tmp_path, "job", "print('ran')\n", mode="schedule", cron=Cron("0 0 1 1 *"))
     supervisor, _ = harness(cfg)
@@ -208,7 +208,7 @@ def test_web_api(tmp_path, harness):
         wait_for(lambda: "hay" in logged(store, "svc"))
 
         status, body = call("/")
-        assert status == 200 and b"<title>scriptrunner</title>" in body
+        assert status == 200 and b"<title>corral</title>" in body
 
         status, body = call("/api/scripts")
         (info,) = json.loads(body)["scripts"]
@@ -238,7 +238,7 @@ def test_web_api(tmp_path, harness):
 
         assert call("/api/scripts/svc/stop", "POST")[0] == 403  # no CSRF header
         assert supervisor.scripts["svc"].status()["enabled"]
-        status, body = call("/api/scripts/svc/stop", "POST", {"X-Scriptrunner": "1"})
+        status, body = call("/api/scripts/svc/stop", "POST", {"X-Corral": "1"})
         assert status == 200 and json.loads(body)["enabled"] is False
         wait_for(lambda: supervisor.scripts["svc"].status()["state"] == "stopped")
     finally:
@@ -267,7 +267,7 @@ def test_project_command_line(tmp_path, fake_uv):
     cfg = ScriptConfig(name="app", project=project, args=("--port", "1"))
     store = LogStore(tmp_path / "db")
     try:
-        from scriptrunner.supervisor import Script
+        from corral.supervisor import Script
 
         assert Script(cfg, store, "uv")._command() == [
             "uv", "run", "--quiet", "--project", str(project), "serve", "--port", "1",

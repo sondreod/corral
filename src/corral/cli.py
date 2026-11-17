@@ -13,23 +13,23 @@ from .store import LogStore
 from .supervisor import Supervisor
 from .web import make_server
 
-DEFAULT_CONFIG = "/etc/scriptrunner/config.toml"
+DEFAULT_CONFIG = "/etc/corral/config.toml"
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        prog="scriptrunner",
+        prog="corral",
         description="Run PEP 723 scripts under supervision and show their status and logs on a web page.",
     )
     parser.add_argument("-c", "--config", default=DEFAULT_CONFIG, help="config file (default: %(default)s)")
     parser.add_argument("--check", action="store_true", help="validate the config file and exit")
-    parser.add_argument("--version", action="version", version=f"scriptrunner {__version__}")
+    parser.add_argument("--version", action="version", version=f"corral {__version__}")
     args = parser.parse_args(argv)
 
     try:
         config = load_config(args.config)
     except ConfigError as exc:
-        print(f"scriptrunner: {exc}", file=sys.stderr)
+        print(f"corral: {exc}", file=sys.stderr)
         return 2
     if args.check:
         print(f"{args.config}: OK, {len(config.scripts)} script(s)")
@@ -39,14 +39,14 @@ def main(argv: list[str] | None = None) -> int:
         config.data_dir.mkdir(parents=True, exist_ok=True)
         store = LogStore(config.data_dir / "logs.sqlite3", config.max_log_lines)
     except (OSError, sqlite3.Error) as exc:
-        print(f"scriptrunner: cannot open the log database in {config.data_dir}: {exc}", file=sys.stderr)
+        print(f"corral: cannot open the log database in {config.data_dir}: {exc}", file=sys.stderr)
         return 1
     supervisor = Supervisor(config, store)
     monitor = Monitor(supervisor, store, config.sample_interval, config.history_days)
     try:
         server = make_server(config.host, config.port, supervisor, store, monitor, config.allowed_hosts)
     except OSError as exc:
-        print(f"scriptrunner: cannot listen on {config.host} port {config.port}: {exc}", file=sys.stderr)
+        print(f"corral: cannot listen on {config.host} port {config.port}: {exc}", file=sys.stderr)
         store.close()
         return 1
 
@@ -59,13 +59,13 @@ def main(argv: list[str] | None = None) -> int:
     threading.Thread(target=server.serve_forever, name="web", daemon=True).start()
     host = f"[{config.host}]" if ":" in config.host else config.host
     print(
-        f"scriptrunner {__version__}: {len(config.scripts)} script(s), "
+        f"corral {__version__}: {len(config.scripts)} script(s), "
         f"web interface on http://{host}:{server.server_address[1]}/",
         flush=True,
     )
 
     stop.wait()
-    print("scriptrunner: shutting down", flush=True)
+    print("corral: shutting down", flush=True)
     monitor.stop()
     supervisor.shutdown()
     server.shutdown()

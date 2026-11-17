@@ -1,8 +1,8 @@
-# Configuration for trying scriptrunner from a checkout:
-#     uv run scriptrunner --config examples/dev-config.toml
+# Configuration for trying corral from a checkout:
+#     uv run corral --config examples/dev-config.toml
 
 [server]
-port = 8724   # not 8723, so it can run beside an installed scriptrunner service
+port = 8724   # not 8723, so it can run beside an installed corral service
 
 [runner]
 data_dir = "../.dev-data"

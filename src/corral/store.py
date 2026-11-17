@@ -54,7 +54,7 @@ CREATE TABLE IF NOT EXISTS samples (
 );
 CREATE INDEX IF NOT EXISTS samples_script_ts ON samples (script, ts);
 
--- Runs left open by a scriptrunner that died: close them at the last moment
+-- Runs left open by a corral that died: close them at the last moment
 -- the script was seen alive.
 UPDATE runs SET
     ended = COALESCE(
@@ -175,7 +175,7 @@ class LogStore:
                             self._prune(conn, script)
                             del self._since_prune[script]
             except sqlite3.Error as exc:  # keep running; losing a batch beats dying
-                print(f"scriptrunner: log write failed: {exc}", flush=True)
+                print(f"corral: log write failed: {exc}", flush=True)
             for item in items:
                 if isinstance(item, threading.Event):
                     item.set()

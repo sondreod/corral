@@ -2,9 +2,9 @@ import re
 import threading
 import urllib.request
 
-from scriptrunner import prometheus
-from scriptrunner.monitor import Monitor
-from scriptrunner.web import make_server
+from corral import prometheus
+from corral.monitor import Monitor
+from corral.web import make_server
 
 from test_supervisor import fake_uv, harness, script, wait_for  # noqa: F401  (fixtures)
 
@@ -29,7 +29,7 @@ def parse(text):
 
 
 def value(samples, metric, **labels):
-    return samples.get((f"scriptrunner_{metric}", tuple(sorted(labels.items()))))
+    return samples.get((f"corral_{metric}", tuple(sorted(labels.items()))))
 
 
 def test_label_escaping():

@@ -4,7 +4,7 @@ import urllib.request
 
 import pytest
 
-from scriptrunner.web import host_filter, make_server
+from corral.web import host_filter, make_server
 
 from test_supervisor import fake_uv, harness, script  # noqa: F401  (fixtures)
 

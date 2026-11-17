@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>scriptrunner</title>
+<title>corral</title>
 <style>
   :root {
     color-scheme: light dark;
@@ -136,7 +136,7 @@
 </head>
 <body>
 <header>
-  <h1><a href="#/">scriptrunner</a></h1>
+  <h1><a href="#/">corral</a></h1>
   <span id="error" hidden></span>
 </header>
 
@@ -293,7 +293,7 @@ function fillActions(node, s) {
     b.onclick = async (ev) => {
       ev.stopPropagation();
       try {
-        await api(scriptUrl(s.name, action), { method: "POST", headers: { "X-Scriptrunner": "1" } });
+        await api(scriptUrl(s.name, action), { method: "POST", headers: { "X-Corral": "1" } });
       } catch (err) { showError(err); }
       refreshScripts();
     };
@@ -599,7 +599,7 @@ function drawMonitor() {
 function runResult(r) {
   if (r.ended == null) return ["running", ""];
   if (r.note === "stopped") return ["stopped on request", ""];
-  if (r.note === "interrupted") return ["interrupted (scriptrunner stopped)", ""];
+  if (r.note === "interrupted") return ["interrupted (corral stopped)", ""];
   if (r.exit_code == null) return ["could not start: " + (r.note || "unknown reason"), "bad"];
   if (r.exit_code === 0) return ["exit 0", ""];
   return [r.exit_code < 0 ? `killed (signal ${-r.exit_code})` : `exit ${r.exit_code}`, "bad"];
@@ -767,7 +767,7 @@ async function refreshScripts() {
     scripts = (await api("/api/scripts")).scripts;
     showError(null);
   } catch (err) {
-    showError("Cannot reach scriptrunner: " + (err.message || err));
+    showError("Cannot reach corral: " + (err.message || err));
     return;
   }
   if (route.view === "overview") renderOverview();

@@ -5,7 +5,7 @@ CONFIG ?= examples/dev-config.toml
 help:
 	@echo "make sync    install the development environment (uv sync)"
 	@echo "make test    run the tests"
-	@echo "make run     run scriptrunner with CONFIG (default: $(CONFIG))"
+	@echo "make run     run corral with CONFIG (default: $(CONFIG))"
 	@echo "make check   validate CONFIG"
 	@echo "make deb     build the Debian package into dist/"
 	@echo "make clean   remove build output, caches and dev data"
@@ -17,10 +17,10 @@ test:
 	uv run pytest
 
 run:
-	uv run scriptrunner --config $(CONFIG)
+	uv run corral --config $(CONFIG)
 
 check:
-	uv run scriptrunner --check --config $(CONFIG)
+	uv run corral --check --config $(CONFIG)
 
 deb:
 	./packaging/build-deb.sh

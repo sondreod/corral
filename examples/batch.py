@@ -1,16 +1,16 @@
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["scriptrunner"]
+# dependencies = ["corral"]
 #
 # [tool.uv.sources]
-# scriptrunner = { path = ".." }   # this checkout; see "Metrics from your scripts" in the README
+# corral = { path = ".." }   # this checkout; see "Metrics from your scripts" in the README
 # ///
-"""Example scheduled script that reports metrics with scriptrunner.metrics."""
+"""Example scheduled script that reports metrics with corral.metrics."""
 
 import os
 import shutil
 
-from scriptrunner.metrics import Counter, Gauge, Histogram
+from corral.metrics import Counter, Gauge, Histogram
 
 BATCHES = Counter("example_batches", "Batches run")  # keeps counting across runs
 DISK_USED = Gauge("example_disk_used_ratio", "Used share of a filesystem", ["mount"])

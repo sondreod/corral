@@ -6,9 +6,9 @@ if [ -d /run/systemd/system ]; then
 fi
 
 if [ "$1" = "purge" ]; then
-    rm -rf /var/lib/scriptrunner /var/cache/scriptrunner
-    rmdir /etc/scriptrunner/scripts /etc/scriptrunner 2>/dev/null || true
-    if getent passwd scriptrunner >/dev/null; then
-        deluser --system --quiet scriptrunner || true
+    rm -rf /var/lib/corral /var/cache/corral
+    rmdir /etc/corral/scripts /etc/corral 2>/dev/null || true
+    if getent passwd corral >/dev/null; then
+        deluser --system --quiet corral || true
     fi
 fi

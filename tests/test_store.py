@@ -1,7 +1,7 @@
 import pytest
 
-from scriptrunner import store as store_module
-from scriptrunner.store import LogStore
+from corral import store as store_module
+from corral.store import LogStore
 
 
 @pytest.fixture

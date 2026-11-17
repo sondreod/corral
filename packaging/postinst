@@ -2,13 +2,13 @@
 set -e
 
 if [ "$1" = "configure" ]; then
-    if ! getent passwd scriptrunner >/dev/null; then
+    if ! getent passwd corral >/dev/null; then
         adduser --system --group --quiet \
-            --home /var/lib/scriptrunner --no-create-home scriptrunner
+            --home /var/lib/corral --no-create-home corral
     fi
-    systemctl enable scriptrunner.service >/dev/null 2>&1 || true
+    systemctl enable corral.service >/dev/null 2>&1 || true
     if [ -d /run/systemd/system ]; then
         systemctl daemon-reload || true
-        systemctl restart scriptrunner.service || true
+        systemctl restart corral.service || true
     fi
 fi

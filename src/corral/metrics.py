@@ -1,7 +1,7 @@
-"""Report metrics from a script run by scriptrunner.
+"""Report metrics from a script run by corral.
 
 This module is for the scripts, not for the runner: a script depends on the
-``scriptrunner`` package and imports ``scriptrunner.metrics``. It uses nothing
+``corral`` package and imports ``corral.metrics``. It uses nothing
 else from the package and only the standard library.
 
 The classes mirror ``prometheus_client``: create ``Counter``, ``Gauge``,
@@ -11,7 +11,7 @@ call prints one line starting with ``@metric`` on standard output. The runner
 recognises those lines, keeps the values and serves them on its ``/metrics``
 page.
 
-When the script is not started by scriptrunner (the SCRIPTRUNNER_METRICS
+When the script is not started by corral (the CORRAL_METRICS
 environment variable is not set) the calls do nothing.
 """
 
@@ -41,7 +41,7 @@ _names: set[str] = set()
 
 def enabled() -> bool:
     """Whether metric lines are being written (the runner is listening)."""
-    return os.environ.get("SCRIPTRUNNER_METRICS", "") not in ("", "0")
+    return os.environ.get("CORRAL_METRICS", "") not in ("", "0")
 
 
 def _write(line: str) -> None:
@@ -100,8 +100,8 @@ class _Metric:
     def __init__(self, name: str, documentation: str = "", labelnames=(), **declaration):
         if not _NAME_RE.match(name):
             raise ValueError(f"invalid metric name {name!r}")
-        if name.startswith("scriptrunner_"):
-            raise ValueError("names starting with scriptrunner_ are reserved for the runner")
+        if name.startswith("corral_"):
+            raise ValueError("names starting with corral_ are reserved for the runner")
         labelnames = tuple(labelnames)
         for label in labelnames:
             if not _LABEL_RE.match(label) or label.startswith("__") or label in _RESERVED_LABELS:

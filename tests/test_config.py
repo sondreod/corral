@@ -1,6 +1,6 @@
 import pytest
 
-from scriptrunner.config import ConfigError, load_config
+from corral.config import ConfigError, load_config
 
 
 def write(tmp_path, text):

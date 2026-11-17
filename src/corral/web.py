@@ -31,7 +31,7 @@ MAX_RANGE = 90 * 86400
 # Browsers only send custom headers cross-origin after a CORS preflight, which
 # this server never approves, so requiring one stops other websites from
 # pressing the buttons on behalf of someone who has the page reachable.
-CSRF_HEADER = "X-Scriptrunner"
+CSRF_HEADER = "X-Corral"
 
 
 def _host_name(header: str) -> str:
@@ -87,7 +87,7 @@ def _int(params: dict, key: str) -> int | None:
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "scriptrunner"
+    server_version = "corral"
     protocol_version = "HTTP/1.1"
     supervisor: Supervisor
     store: LogStore
@@ -122,7 +122,7 @@ class Handler(BaseHTTPRequestHandler):
                     f"this server does not answer to the host name {host!r}; add it to allowed_hosts",
                 )
             if method == "GET" and not parts:
-                page = resources.files("scriptrunner").joinpath("static/index.html").read_bytes()
+                page = resources.files("corral").joinpath("static/index.html").read_bytes()
                 self._send(HTTPStatus.OK, page, "text/html; charset=utf-8")
             elif method == "GET" and parts == ["metrics"]:
                 text = prometheus.render(self.supervisor, self.monitor)

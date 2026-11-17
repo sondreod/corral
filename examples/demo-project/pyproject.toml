@@ -1,7 +1,7 @@
 [project]
 name = "demo-project"
 version = "0.1.0"
-description = "Example project for scriptrunner: two entry points in one package"
+description = "Example project for corral: two entry points in one package"
 requires-python = ">=3.11"
 dependencies = []
 

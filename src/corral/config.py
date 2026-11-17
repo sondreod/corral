@@ -58,7 +58,7 @@ class Config:
     port: int = 8723
     # Host names the web interface answers to besides localhost; "*" for any.
     allowed_hosts: tuple[str, ...] = ()
-    data_dir: Path = Path("/var/lib/scriptrunner")
+    data_dir: Path = Path("/var/lib/corral")
     uv: str = "uv"
     max_log_lines: int = 100_000
     sample_interval: float = 10.0
@@ -201,7 +201,7 @@ def load_config(path: str | Path) -> Config:
             raise ConfigError("'allowed_hosts' must be a list of host names")
         _no_leftovers(server, "[server]")
 
-        data_dir_raw = _take(runner, "data_dir", str, "/var/lib/scriptrunner")
+        data_dir_raw = _take(runner, "data_dir", str, "/var/lib/corral")
         if not data_dir_raw:
             raise ConfigError("'data_dir' must not be empty")
         data_dir = base / data_dir_raw

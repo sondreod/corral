@@ -2,7 +2,7 @@ from datetime import datetime
 
 import pytest
 
-from scriptrunner.schedule import Cron, parse_duration
+from corral.schedule import Cron, parse_duration
 
 
 @pytest.mark.parametrize(

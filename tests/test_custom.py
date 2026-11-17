@@ -2,9 +2,9 @@ import json
 
 import pytest
 
-from scriptrunner import metrics as client
-from scriptrunner import prometheus
-from scriptrunner.custom import MAX_SERIES, MetricError, ScriptMetrics
+from corral import metrics as client
+from corral import prometheus
+from corral.custom import MAX_SERIES, MetricError, ScriptMetrics
 
 from test_prometheus import parse
 from test_supervisor import fake_uv, harness, logged, script, wait_for  # noqa: F401  (fixtures)
@@ -77,7 +77,7 @@ def test_redeclaring_keeps_values_unless_the_type_changes():
         ("[1]", "object"),
         ('{"name": "x", "op": "inc", "colour": 1}', "unknown key"),
         ('{"name": "9x", "op": "inc"}', "name"),
-        ('{"name": "scriptrunner_x", "op": "inc"}', "reserved"),
+        ('{"name": "corral_x", "op": "inc"}', "reserved"),
         ('{"name": "x", "op": "explode"}', "op must be"),
         ('{"name": "x", "op": "declare"}', "needs a type"),
         ('{"name": "x", "op": "declare", "type": "gauge", "buckets": [1]}', "buckets"),
@@ -122,7 +122,7 @@ def test_series_limit():
 def emitted(monkeypatch):
     """The lines the client library writes, with the runner's flag set."""
     lines = []
-    monkeypatch.setenv("SCRIPTRUNNER_METRICS", "1")
+    monkeypatch.setenv("CORRAL_METRICS", "1")
     monkeypatch.setattr(client, "_write", lines.append)
     monkeypatch.setattr(client, "_names", set())
     return lines
@@ -195,7 +195,7 @@ def test_client_checks_its_arguments(emitted):
 
 
 def test_client_is_silent_outside_the_runner(emitted, monkeypatch):
-    monkeypatch.delenv("SCRIPTRUNNER_METRICS")
+    monkeypatch.delenv("CORRAL_METRICS")
     client.Counter("jobs").inc()
     assert emitted == [] and not client.enabled()
 
@@ -206,8 +206,8 @@ def test_client_is_silent_outside_the_runner(emitted, monkeypatch):
 def test_script_metrics_reach_the_metrics_page(tmp_path, harness):  # noqa: F811
     body = (
         "import os, time\n"
-        "from scriptrunner.metrics import Counter, Gauge\n"
-        "assert os.environ['SCRIPTRUNNER_METRICS'] == '1'\n"
+        "from corral.metrics import Counter, Gauge\n"
+        "assert os.environ['CORRAL_METRICS'] == '1'\n"
         "runs = Counter('batch_runs', 'Batches run', ['result'])\n"
         "runs.labels('ok').inc()\n"
         "Gauge('batch_rows').set(42)\n"
@@ -257,7 +257,7 @@ def test_scripts_disagreeing_about_a_type():
         "# TYPE rows gauge",
         'rows{script="a"} 1',
         'rows{script="c"} 3',
-        "# scriptrunner: left out rows (histogram) from script b: name in use",
+        "# corral: left out rows (histogram) from script b: name in use",
     ]
 
 

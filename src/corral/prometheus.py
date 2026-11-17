@@ -61,10 +61,10 @@ def render(supervisor: Supervisor, monitor: Monitor | None = None) -> str:
     families: list[_Family] = []
 
     def family(name: str, kind: str, help: str) -> _Family:
-        families.append(_Family(f"scriptrunner_{name}", kind, help))
+        families.append(_Family(f"corral_{name}", kind, help))
         return families[-1]
 
-    info = family("build_info", "gauge", "The running scriptrunner version.")
+    info = family("build_info", "gauge", "The running corral version.")
     info.add(1, version=__version__)
 
     state = family("script_state", "gauge", "1 for the state the script is in, 0 for the others.")
@@ -125,7 +125,7 @@ def _custom(supervisor: Supervisor, taken: set[str]) -> list[str]:
     for script_name, script in supervisor.scripts.items():
         for name, kind, help, samples in script.metrics.families():
             if name in taken or (name in merged and merged[name][0] != kind):
-                skipped.append(f"# scriptrunner: left out {name} ({kind}) from script {script_name}: name in use")
+                skipped.append(f"# corral: left out {name} ({kind}) from script {script_name}: name in use")
                 continue
             if name not in merged:
                 merged[name] = (kind, help, [])

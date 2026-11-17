@@ -4,10 +4,10 @@ import time
 
 import pytest
 
-from scriptrunner.config import Config, ScriptConfig
-from scriptrunner.monitor import Monitor, ProcInfo, parse_stat, process_tree
-from scriptrunner.store import LogStore
-from scriptrunner.supervisor import Supervisor
+from corral.config import Config, ScriptConfig
+from corral.monitor import Monitor, ProcInfo, parse_stat, process_tree
+from corral.store import LogStore
+from corral.supervisor import Supervisor
 
 from test_supervisor import fake_uv, wait_for  # noqa: F401  (fake_uv is a fixture)
 

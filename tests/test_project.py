@@ -3,7 +3,7 @@ import sys
 
 import pytest
 
-from scriptrunner.project import ProjectError, declared_scripts, project_command
+from corral.project import ProjectError, declared_scripts, project_command
 
 
 def make_project(tmp_path, pyproject):

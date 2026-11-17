@@ -1,4 +1,4 @@
-# scriptrunner
+# corral
 
 Runs Python scripts that declare their dependencies inline
 ([PEP 723](https://peps.python.org/pep-0723/)) under supervision, captures
@@ -10,7 +10,7 @@ It can also run entry points of whole Python projects (directories with a
 `pyproject.toml`).
 
 Scripts are started with `uv run`, so [uv](https://docs.astral.sh/uv/)
-must be installed on the machine. scriptrunner itself uses only the Python
+must be installed on the machine. corral itself uses only the Python
 standard library (Python 3.11 or newer).
 
 ## Configuration
@@ -62,7 +62,7 @@ entrypoint = "myapp.jobs:main"    # module:function, as written in pyproject.tom
 
 The entry point runs as `uv run --project <dir> ...`: uv keeps the environment
 in `<dir>/.venv` and creates or updates `<dir>/uv.lock`, so the user
-scriptrunner runs as needs write access to the project directory. The project
+corral runs as needs write access to the project directory. The project
 must be installable (have a `[build-system]`) for its scripts and modules to
 be available. `pyproject.toml` is read at every start, so problems show up in
 the script's log (`runner` stream) and are retried like a failed start.
@@ -76,7 +76,7 @@ the script's log (`runner` stream) and are retried like a failed start.
   one. `cron` takes the usual five fields, in local time.
 - Stopping a script sends SIGTERM to its whole process group, then SIGKILL
   after `stop_timeout` seconds.
-- Stop/start/disable from the web page lasts until scriptrunner restarts; the
+- Stop/start/disable from the web page lasts until corral restarts; the
   `enabled` option decides the state at startup.
 
 The web interface has no authentication. It listens on localhost by default;
@@ -90,7 +90,7 @@ check off).
 ## Logs
 
 Lines are stored in SQLite (`logs.sqlite3` in `data_dir`) with a timestamp and
-their stream: `stdout`, `stderr`, or `runner` for scriptrunner's own notes
+their stream: `stdout`, `stderr`, or `runner` for corral's own notes
 (started, exited with code N, ...). The newest `max_log_lines` per script are
 kept. The web page filters by substring (case-insensitive) and by stream.
 
@@ -122,17 +122,17 @@ one series per script (label `script`):
 
 | Metric | Type | Meaning |
 | --- | --- | --- |
-| `scriptrunner_script_state{state=…}` | gauge | 1 for the current state (`stopped`, `starting`, `running`, `stopping`, `backoff`, `waiting`), 0 for the others |
-| `scriptrunner_script_up` | gauge | 1 while the script has a process |
-| `scriptrunner_script_enabled` | gauge | 0 after Stop/Disable |
-| `scriptrunner_script_runs_total` | counter | starts |
-| `scriptrunner_script_run_failures_total` | counter | runs that could not start or exited non-zero (requested stops excluded) |
-| `scriptrunner_script_log_lines_total{stream=…}` | counter | lines printed on `stdout` / `stderr` |
-| `scriptrunner_script_cpu_seconds_total` | counter | CPU time of the process tree |
-| `scriptrunner_script_resident_memory_bytes`, `…_threads`, `…_open_fds` | gauge | as on the dashboard; absent while not running |
-| `scriptrunner_script_last_exit_code` | gauge | absent until a run has finished |
-| `scriptrunner_script_last_start_time_seconds`, `…_last_exit_time_seconds`, `…_next_run_time_seconds` | gauge | Unix times |
-| `scriptrunner_build_info{version=…}` | gauge | always 1 |
+| `corral_script_state{state=…}` | gauge | 1 for the current state (`stopped`, `starting`, `running`, `stopping`, `backoff`, `waiting`), 0 for the others |
+| `corral_script_up` | gauge | 1 while the script has a process |
+| `corral_script_enabled` | gauge | 0 after Stop/Disable |
+| `corral_script_runs_total` | counter | starts |
+| `corral_script_run_failures_total` | counter | runs that could not start or exited non-zero (requested stops excluded) |
+| `corral_script_log_lines_total{stream=…}` | counter | lines printed on `stdout` / `stderr` |
+| `corral_script_cpu_seconds_total` | counter | CPU time of the process tree |
+| `corral_script_resident_memory_bytes`, `…_threads`, `…_open_fds` | gauge | as on the dashboard; absent while not running |
+| `corral_script_last_exit_code` | gauge | absent until a run has finished |
+| `corral_script_last_start_time_seconds`, `…_last_exit_time_seconds`, `…_next_run_time_seconds` | gauge | Unix times |
+| `corral_build_info{version=…}` | gauge | always 1 |
 
 Counters start at zero when the runner starts. CPU, memory, threads and open
 files come from the most recent sample, so they lag by up to
@@ -141,27 +141,27 @@ samples is not seen. A scrape job:
 
 ```yaml
 scrape_configs:
-  - job_name: scriptrunner
+  - job_name: corral
     static_configs:
       - targets: ["127.0.0.1:8723"]
 ```
 
-For example, `rate(scriptrunner_script_cpu_seconds_total[1m])` is CPU use in
-cores, and `increase(scriptrunner_script_run_failures_total[1h]) > 0` finds
+For example, `rate(corral_script_cpu_seconds_total[1m])` is CPU use in
+cores, and `increase(corral_script_run_failures_total[1h]) > 0` finds
 scripts that failed in the last hour.
 
 ### Metrics from your scripts
 
 Scripts can report their own metrics, which appear on the same `/metrics`
-page with a `script` label added. In Python, use `scriptrunner.metrics`, a
+page with a `script` label added. In Python, use `corral.metrics`, a
 module of this package made for the scripts; it needs only the standard
 library and works like `prometheus_client`:
 
 ```python
 # /// script
-# dependencies = ["scriptrunner"]
+# dependencies = ["corral"]
 # ///
-from scriptrunner.metrics import Counter, Gauge, Histogram
+from corral.metrics import Counter, Gauge, Histogram
 
 JOBS = Counter("jobs_processed", "Jobs processed", ["queue"])
 DEPTH = Gauge("queue_depth", "Jobs waiting")
@@ -173,25 +173,28 @@ with DURATION.time():
     ...
 ```
 
-The script gets the module by depending on the `scriptrunner` package like
+The script gets the module by depending on the `corral` package like
 on any other. The package is not on an index, so the header also says where
-it is: the path of a checkout of this repository. A relative path is taken
+it is: the path of a checkout of this repository. Do not leave that out:
+without the path uv looks for `corral` on PyPI, where this project is not
+published, so it would fail or, if someone else ever publishes a package by
+that name, install theirs. A relative path is taken
 from the script's own directory, as in
 [`examples/batch.py`](examples/batch.py):
 
 ```python
 # /// script
-# dependencies = ["scriptrunner"]
+# dependencies = ["corral"]
 #
 # [tool.uv.sources]
-# scriptrunner = { path = "/path/to/scriptrunner" }
+# corral = { path = "/path/to/corral" }
 # ///
 ```
 
 The runner's user must be able to read that directory. uv builds the package
 from it once and caches the result. It rebuilds when the checkout's
 `pyproject.toml` changes (a new version, say), not on every source edit;
-`uv cache clean scriptrunner` forces it.
+`uv cache clean corral` forces it.
 
 A project does the same in its `pyproject.toml`. The script's copy is
 independent of the runner that starts it (the Debian package does not provide
@@ -206,8 +209,8 @@ There are `Counter` (`inc`, `count_exceptions`), `Gauge` (`set`, `inc`,
   the script exits. Everything starts again when the runner restarts.
 - A counter is exposed with `_total` added to its name if it is missing.
 - A `Summary` has `_count` and `_sum` only, no quantiles.
-- Run by hand, outside scriptrunner, the calls do nothing (set
-  `SCRIPTRUNNER_METRICS=1` to see what would be sent).
+- Run by hand, outside corral, the calls do nothing (set
+  `CORRAL_METRICS=1` to see what would be sent).
 
 Under the hood each call prints one line on standard output, `@metric`
 followed by a JSON object, so any program can report metrics without the
@@ -230,7 +233,7 @@ Metric lines are not stored as log lines and do not count towards log
 volume. A line the runner cannot use is reported in the script's log (the
 first ten per run). A line only counts if `@metric` is at its very start, so
 finish any partial line before reporting. Names starting with
-`scriptrunner_` and the label `script` are reserved, and a script is limited
+`corral_` and the label `script` are reserved, and a script is limited
 to 2000 series. If two scripts use the same name for different types, the
 second one is left out and noted in a comment at the end of `/metrics`.
 
@@ -238,7 +241,7 @@ second one is left out and noted in a comment at the end of `/metrics`.
 
 ```sh
 make test     # uv run pytest
-make run      # uv run scriptrunner --config examples/dev-config.toml -> http://127.0.0.1:8724/
+make run      # uv run corral --config examples/dev-config.toml -> http://127.0.0.1:8724/
 make deb      # build the Debian package into dist/
 make help     # the other targets
 ```
@@ -247,26 +250,26 @@ make help     # the other targets
 
 ```sh
 make deb                          # needs uv and dpkg-deb
-sudo apt install ./dist/scriptrunner_0.1.0_all.deb
+sudo apt install ./dist/corral_0.1.0_all.deb
 ```
 
-The package installs a systemd service, `scriptrunner.service`, enabled and
+The package installs a systemd service, `corral.service`, enabled and
 started on installation and restarted if it ever exits. It runs as the
-`scriptrunner` system user.
+`corral` system user.
 
 | Path | Purpose |
 | --- | --- |
-| `/etc/scriptrunner/config.toml` | configuration (kept on upgrade) |
-| `/etc/scriptrunner/scripts/` | suggested place for your scripts |
-| `/var/lib/scriptrunner/` | log database |
-| `/var/cache/scriptrunner/` | uv's cache of script environments |
-| `/usr/share/doc/scriptrunner/examples/` | example scripts |
+| `/etc/corral/config.toml` | configuration (kept on upgrade) |
+| `/etc/corral/scripts/` | suggested place for your scripts |
+| `/var/lib/corral/` | log database |
+| `/var/cache/corral/` | uv's cache of script environments |
+| `/usr/share/doc/corral/examples/` | example scripts |
 
-After editing the configuration: `scriptrunner --check`, then
-`sudo systemctl restart scriptrunner`. The service's own messages are in
-`journalctl -u scriptrunner`.
+After editing the configuration: `corral --check`, then
+`sudo systemctl restart corral`. The service's own messages are in
+`journalctl -u corral`.
 
 uv is not packaged in Debian, so it is not a package dependency. Install it
 somewhere on the system PATH (for example `/usr/local/bin/uv`) or set `uv` in
-the `[runner]` section to its full path. The `scriptrunner` user needs network
+the `[runner]` section to its full path. The `corral` user needs network
 access the first time a script runs, to fetch its dependencies.

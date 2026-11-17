@@ -136,7 +136,7 @@ class Monitor:
                     self._store.prune_history(time.time() - self._retention)
                     next_prune = time.monotonic() + _PRUNE_INTERVAL
             except Exception as exc:  # keep measuring whatever happens
-                print(f"scriptrunner: monitoring failed: {exc!r}", flush=True)
+                print(f"corral: monitoring failed: {exc!r}", flush=True)
 
     def sample(self) -> None:
         now = time.time()
