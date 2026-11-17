@@ -4,25 +4,72 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>corral</title>
+<script>
+  // Before the page draws, so a chosen theme never flashes the default one.
+  (function () {
+    var m = /[?&]theme=([a-z-]+)/.exec(location.hash), t = m && m[1];
+    try { t = t || localStorage.getItem("corral-theme"); } catch (e) {}
+    if (t && t !== "auto") document.documentElement.dataset.theme = t;
+  })();
+</script>
 <style>
+  /* Themes: "auto" (no data-theme) follows the system; the others are picked
+     in the header and remembered in this browser. Charts only use these. */
   :root {
-    color-scheme: light dark;
+    color-scheme: light;
     --bg: #f4f5f7; --panel: #ffffff; --border: #d9dce1; --text: #1c1f24; --muted: #68707d;
-    --accent: #2563eb; --selected: #e8effd; --log-bg: #ffffff;
+    --accent: #2563eb; --selected: #e8effd; --log-bg: #ffffff; --on-accent: #ffffff;
     --green: #17803d; --amber: #b45309; --red: #c62828; --blue: #2563eb; --grey: #7b8492;
     --series-1: #2a78d6; --series-2: #eb6834; --grid: #e4e6ea; --axis: #c3c7ce;
     --c1: #2a78d6; --c2: #eb6834; --c3: #1b998b; --c4: #c2408f;
     --c5: #9a7b0a; --c6: #7356d0; --c7: #3a8f3a; --c8: #8c5a3c;
   }
   @media (prefers-color-scheme: dark) {
-    :root {
+    :root:not([data-theme]) {
+      color-scheme: dark;
       --bg: #14161a; --panel: #1c1f25; --border: #30353e; --text: #e3e6ea; --muted: #939ba8;
-      --accent: #6ea0ff; --selected: #232c40; --log-bg: #101216;
+      --accent: #6ea0ff; --selected: #232c40; --log-bg: #101216; --on-accent: #0d1117;
       --green: #4ade80; --amber: #fbbf24; --red: #f87171; --blue: #6ea0ff; --grey: #8a93a1;
       --series-1: #3987e5; --series-2: #d95926; --grid: #2a2e36; --axis: #3a404a;
       --c1: #4a90e8; --c2: #f07a48; --c3: #2bb3a3; --c4: #dd5aa6;
       --c5: #c9a227; --c6: #9a82ec; --c7: #55b055; --c8: #b07b5a;
     }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+      --bg: #14161a; --panel: #1c1f25; --border: #30353e; --text: #e3e6ea; --muted: #939ba8;
+      --accent: #6ea0ff; --selected: #232c40; --log-bg: #101216; --on-accent: #0d1117;
+      --green: #4ade80; --amber: #fbbf24; --red: #f87171; --blue: #6ea0ff; --grey: #8a93a1;
+      --series-1: #3987e5; --series-2: #d95926; --grid: #2a2e36; --axis: #3a404a;
+      --c1: #4a90e8; --c2: #f07a48; --c3: #2bb3a3; --c4: #dd5aa6;
+      --c5: #c9a227; --c6: #9a82ec; --c7: #55b055; --c8: #b07b5a;
+  }
+  :root[data-theme="solarized-light"] {
+    color-scheme: light;
+    --bg: #eee8d5; --panel: #fdf6e3; --border: #d6cfba; --text: #073642; --muted: #5f747b;
+    --accent: #268bd2; --selected: #e6dfc8; --log-bg: #fdf6e3; --on-accent: #fdf6e3;
+    --green: #6b7d00; --amber: #a07800; --red: #dc322f; --blue: #268bd2; --grey: #839496;
+    --series-1: #268bd2; --series-2: #cb4b16; --grid: #e4ddc8; --axis: #c9c1aa;
+    --c1: #268bd2; --c2: #cb4b16; --c3: #2aa198; --c4: #d33682;
+    --c5: #b58900; --c6: #6c71c4; --c7: #859900; --c8: #8f5a3c;
+  }
+  :root[data-theme="solarized-dark"] {
+    color-scheme: dark;
+    --bg: #002b36; --panel: #073642; --border: #1a4b57; --text: #d5dcd8; --muted: #93a1a1;
+    --accent: #3a9ee6; --selected: #0e4a58; --log-bg: #00252e; --on-accent: #002b36;
+    --green: #9cb300; --amber: #d4a400; --red: #f0524e; --blue: #3a9ee6; --grey: #839496;
+    --series-1: #3a9ee6; --series-2: #e0612a; --grid: #0f414e; --axis: #2a5966;
+    --c1: #3a9ee6; --c2: #e0612a; --c3: #2fb5aa; --c4: #e2508f;
+    --c5: #c99a00; --c6: #8a8fe0; --c7: #9cb300; --c8: #c08060;
+  }
+  :root[data-theme="nord"] {
+    color-scheme: dark;
+    --bg: #2e3440; --panel: #3b4252; --border: #4c566a; --text: #eceff4; --muted: #b0b9c9;
+    --accent: #88c0d0; --selected: #434c5e; --log-bg: #2b303b; --on-accent: #2e3440;
+    --green: #a3be8c; --amber: #ebcb8b; --red: #e08a92; --blue: #81a1c1; --grey: #8f99ad;
+    --series-1: #88c0d0; --series-2: #d08770; --grid: #464f61; --axis: #586379;
+    --c1: #88c0d0; --c2: #d08770; --c3: #a3be8c; --c4: #b48ead;
+    --c5: #ebcb8b; --c6: #81a1c1; --c7: #8fbcbb; --c8: #c9a07e;
   }
   * { box-sizing: border-box; }
   html, body { height: 100%; margin: 0; }
@@ -48,6 +95,17 @@
   header nav a:hover { text-decoration: none; color: var(--text); }
   header nav a.active { color: var(--text); background: var(--selected); font-weight: 600; }
   #error { color: var(--red); }
+  header .grow { flex: 1; }
+  #theme { background: var(--panel); border: 1px solid var(--border); border-radius: 5px; padding: 2px 6px;
+           color: var(--muted); font-size: 13px; }
+
+  /* kiosk: only the panels, for a wall screen */
+  body.kiosk header, body.kiosk .dashbar { display: none !important; }
+  body.kiosk #dashboard { padding: 12px; }
+  #kioskexit { position: fixed; top: 10px; right: 10px; z-index: 20; opacity: 0; transition: opacity .3s;
+               box-shadow: 0 2px 8px rgba(0, 0, 0, .25); }
+  body.kiosk.awake #kioskexit { opacity: 1; }
+  body.kiosk:not(.awake) { cursor: none; }
 
   /* state colours, shared by cards and the script header */
   .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--grey); flex: none; }
@@ -145,7 +203,7 @@
   #dashnameinput { font-size: 16px; font-weight: 600; min-width: 0; width: 260px; }
   input[type=text], input[type=number], input:not([type]), select {
     background: var(--panel); border: 1px solid var(--border); border-radius: 5px; padding: 3px 7px; }
-  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
   button.danger:hover { border-color: var(--red); color: var(--red); }
   #dashes { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr)); gap: 12px; }
   #dashes .card .name { flex: none; }
@@ -220,6 +278,15 @@
     <a href="#/" id="nav-scripts">Scripts</a>
     <a href="#/d" id="nav-dash">Dashboards</a>
   </nav>
+  <span class="grow"></span>
+  <select id="theme" aria-label="Theme">
+    <option value="auto">Theme: auto</option>
+    <option value="light">Light</option>
+    <option value="dark">Dark</option>
+    <option value="solarized-light">Solarized light</option>
+    <option value="solarized-dark">Solarized dark</option>
+    <option value="nord">Nord</option>
+  </select>
   <span id="error" hidden></span>
 </header>
 
@@ -286,8 +353,10 @@
     <span class="detail" id="dashstatus"></span>
     <button id="addpanel" hidden>Add panel</button>
     <button id="deldash" class="danger" hidden>Delete dashboard</button>
+    <button id="kioskbtn" title="Full screen, panels only">Kiosk</button>
     <button id="editdash">Edit</button>
   </div>
+  <button id="kioskexit" hidden>Exit kiosk</button>
   <div id="grid" class="grid"><div id="ghost" class="ghost" hidden></div></div>
 </section>
 
@@ -1179,7 +1248,7 @@ function boxOf(p, g) {
 
 // Position every panel; `positions` overrides the saved ones while dragging,
 // and the panel `ghostId` is shown as a drop target instead.
-function placePanels(positions, ghostId) {
+function placePanels(positions, ghostId, again = true) {
   const g = gridGeometry();
   let layout;
   if (g.narrow) {  // one column, in reading order
@@ -1196,6 +1265,9 @@ function placePanels(positions, ghostId) {
     Object.assign(target.style, { left: b.left + "px", top: b.top + "px", width: b.width + "px", height: b.height + "px" });
   }
   $("grid").style.height = Math.max(bottom, 120) + "px";
+  // The new height may have added or removed the page's scrollbar, and so
+  // changed the width everything was placed for.
+  if (again && $("grid").clientWidth !== g.W) placePanels(positions, ghostId, false);
 }
 
 function startDrag(ev, view, mode) {
@@ -1603,14 +1675,96 @@ $("editor").addEventListener("close", () => {
   saveDashboard();
 });
 
+// ---- themes and kiosk --------------------------------------------------
+
+const THEMES = ["auto", "light", "dark", "solarized-light", "solarized-dark", "nord"];
+
+function savedTheme() {
+  try { return localStorage.getItem("corral-theme") || "auto"; } catch (err) { return "auto"; }
+}
+
+// A theme in the link (?theme=nord, for kiosk screens) wins over the saved one.
+function applyTheme() {
+  const linked = route.theme && THEMES.includes(route.theme) ? route.theme : null;
+  const theme = linked || savedTheme();
+  if (theme === "auto") delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = theme;
+  $("theme").value = theme;
+}
+
+$("theme").addEventListener("change", () => {
+  try { localStorage.setItem("corral-theme", $("theme").value); } catch (err) { /* not remembered, still applied */ }
+  if (route.theme) {  // drop the link's theme, or it would keep overriding the choice
+    location.hash = location.hash.replace(/([?&])theme=[^&]*&?/, "$1").replace(/[?&]$/, "");
+  }
+  route.theme = null;
+  applyTheme();
+});
+
+let kioskIdle = null;
+let kioskFullscreen = false;   // whether kiosk mode asked for full screen (so leaving it leaves kiosk)
+
+function wakeKiosk() {
+  document.body.classList.add("awake");
+  clearTimeout(kioskIdle);
+  kioskIdle = setTimeout(() => document.body.classList.remove("awake"), 2500);
+}
+
+function setKiosk(on) {
+  const was = document.body.classList.contains("kiosk");
+  document.body.classList.toggle("kiosk", on);
+  $("kioskexit").hidden = !on;
+  if (on && dashEditing) setEditing(false);
+  if (on && !was) wakeKiosk();
+  if (!on && was && document.fullscreenElement) {
+    kioskFullscreen = false;
+    document.exitFullscreen().catch(() => {});
+  }
+}
+
+function leaveKiosk() {
+  if (route.view === "dashboard") location.hash = `#/d/${route.id}`;
+}
+
+$("kioskbtn").onclick = () => {
+  if (!dash) return;
+  const theme = route.theme ? `&theme=${route.theme}` : "";
+  location.hash = `#/d/${dash.id}?kiosk${theme}`;
+  // Must be asked for in the click itself; a bookmarked kiosk link shows the
+  // panels without full screen (use the browser's own kiosk mode for that).
+  if (document.documentElement.requestFullscreen) {
+    document.documentElement.requestFullscreen()
+      .then(() => { kioskFullscreen = true; })
+      .catch(() => {});
+  }
+};
+$("kioskexit").onclick = leaveKiosk;
+document.addEventListener("fullscreenchange", () => {
+  if (!document.fullscreenElement && kioskFullscreen) {  // Esc in full screen
+    kioskFullscreen = false;
+    leaveKiosk();
+  }
+  setTimeout(redrawPanels, 100);
+});
+document.addEventListener("keydown", (ev) => {
+  if (ev.key === "Escape" && document.body.classList.contains("kiosk") && !document.fullscreenElement) leaveKiosk();
+});
+for (const type of ["pointermove", "pointerdown", "keydown"]) {
+  document.addEventListener(type, () => { if (document.body.classList.contains("kiosk")) wakeKiosk(); });
+}
+
 // ---- routing and refresh -----------------------------------------------
 
 // "#/" is the overview; "#/s/<name>/logs" and "#/s/<name>/monitor" are a script's tabs;
 // "#/d" lists the dashboards and "#/d/<id>" shows one.
 function parseRoute() {
-  const parts = location.hash.replace(/^#\/?/, "").split("/").map(decodeURIComponent);
+  const [path, query] = location.hash.replace(/^#\/?/, "").split("?");
+  const params = new URLSearchParams(query || "");
+  const parts = path.split("/").map(decodeURIComponent);
+  if (parts[0] === "d" && /^\d+$/.test(parts[1] || "")) {
+    return { view: "dashboard", id: Number(parts[1]), kiosk: params.has("kiosk"), theme: params.get("theme") };
+  }
   if (parts[0] === "s" && parts[1]) return { view: parts[2] === "monitor" ? "monitor" : "logs", name: parts[1] };
-  if (parts[0] === "d" && /^\d+$/.test(parts[1] || "")) return { view: "dashboard", id: Number(parts[1]) };
   if (parts[0] === "d") return { view: "dashlist" };
   return { view: "overview" };
 }
@@ -1637,7 +1791,9 @@ function applyRoute() {
   $("dashboard").hidden = route.view !== "dashboard";
   $("nav-scripts").classList.toggle("active", !onDash);
   $("nav-dash").classList.toggle("active", onDash);
-  document.title = "corral";
+  document.title = route.view === "dashboard" && dash && dash.id === route.id ? dash.name + " · corral" : "corral";
+  applyTheme();
+  setKiosk(route.view === "dashboard" && route.kiosk);
   if (route.view !== "dashboard") {
     clearTimeout(dashTimer);
     if (before.view === "dashboard") dashEditing = false;
@@ -1645,6 +1801,7 @@ function applyRoute() {
   if (route.view === "dashlist") return loadDashList();
   if (route.view === "dashboard") {
     if (before.view !== "dashboard" || before.id !== route.id) openDashboard(route.id);
+    else if (before.kiosk !== route.kiosk) requestAnimationFrame(refreshPanels);  // the panels changed size
     return;
   }
   if (!onScript) {
@@ -1693,6 +1850,17 @@ window.addEventListener("resize", () => {
   }, 150);
 });
 window.addEventListener("hashchange", applyRoute);
+// The grid also changes width without the window doing so (a scrollbar
+// appearing, kiosk mode), and the panels are positioned in pixels.
+let gridWidth = 0, gridTimer;
+new ResizeObserver(() => {
+  const width = $("grid").clientWidth;
+  if (!width || width === gridWidth || route.view !== "dashboard" || !dash) return;
+  gridWidth = width;
+  placePanels();
+  clearTimeout(gridTimer);
+  gridTimer = setTimeout(redrawPanels, 150);
+}).observe($("grid"));
 
 buildMonitor();
 loadCatalog().catch(() => {});
