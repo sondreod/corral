@@ -15,7 +15,7 @@ port = 8723
 # allowed_hosts = ["scripts.example.com"]
 
 [runner]
-# Where the log database lives.
+# Where the log and metrics databases live.
 data_dir = "/var/lib/corral"
 # The uv executable used to run scripts ("uv run --script"). Give a full path
 # if uv is not on the service's PATH (/usr/local/bin, /usr/bin, ...).
@@ -27,6 +27,14 @@ max_log_lines = 100000
 # runs) are kept.
 sample_interval = "10s"
 history_days = 7
+
+[metrics]
+# How often corral reads its own /metrics page (which includes the scripts'
+# own metrics) and stores every value, for the graphs on the Dashboards page.
+scrape_interval = "1m"
+# How long stored values are kept. Each series takes roughly 20 bytes per
+# scrape: 30 days at one a minute is under 1 MB per series.
+retention = "30d"
 
 # One table per script or project entry point. Relative paths are relative to
 # this file's directory, so scripts can live in /etc/corral/scripts/.

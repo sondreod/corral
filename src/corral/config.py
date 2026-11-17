@@ -63,6 +63,9 @@ class Config:
     max_log_lines: int = 100_000
     sample_interval: float = 10.0
     history_days: float = 7.0
+    # stored metrics: how often /metrics is scraped, and how long samples are kept
+    scrape_interval: float = 60.0
+    metrics_retention: float = 30 * 86400.0
     scripts: tuple[ScriptConfig, ...] = ()
 
 
@@ -187,6 +190,7 @@ def load_config(path: str | Path) -> Config:
     try:
         server = _table(raw, "server")
         runner = _table(raw, "runner")
+        metrics = _table(raw, "metrics")
         scripts_raw = _table(raw, "scripts")
         _no_leftovers(raw, "top level")
 
@@ -219,6 +223,20 @@ def load_config(path: str | Path) -> Config:
             raise ConfigError("'max_log_lines' must be positive")
         if history_days <= 0:
             raise ConfigError("'history_days' must be positive")
+
+        try:
+            scrape_interval = parse_duration(metrics.pop("scrape_interval", "1m"))
+        except ValueError as exc:
+            raise ConfigError(f"'scrape_interval': {exc}") from None
+        if scrape_interval < 1:
+            raise ConfigError("'scrape_interval' must be at least one second")
+        try:
+            metrics_retention = parse_duration(metrics.pop("retention", "30d"))
+        except ValueError as exc:
+            raise ConfigError(f"'retention': {exc}") from None
+        if metrics_retention < scrape_interval:
+            raise ConfigError("'retention' must not be shorter than 'scrape_interval'")
+        _no_leftovers(metrics, "[metrics]")
     except ConfigError as exc:
         raise ConfigError(f"{path}: {exc}") from None
 
@@ -240,5 +258,7 @@ def load_config(path: str | Path) -> Config:
         max_log_lines=max_log_lines,
         sample_interval=sample_interval,
         history_days=history_days,
+        scrape_interval=scrape_interval,
+        metrics_retention=metrics_retention,
         scripts=tuple(scripts),
     )

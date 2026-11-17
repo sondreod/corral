@@ -8,6 +8,9 @@ port = 8724   # not 8723, so it can run beside an installed corral service
 data_dir = "../.dev-data"
 sample_interval = "2s"   # frequent, so the charts fill quickly while trying things out
 
+[metrics]
+scrape_interval = "10s"  # likewise; the default is once a minute
+
 [scripts.ticker]
 path = "ticker.py"
 

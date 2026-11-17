@@ -3,8 +3,9 @@
 Runs Python scripts that declare their dependencies inline
 ([PEP 723](https://peps.python.org/pep-0723/)) under supervision, captures
 their stdout and stderr, and serves a web interface: a dashboard with the
-status and resource usage of every script, and per script a filterable log
-view and monitoring charts.
+status and resource usage of every script, per script a filterable log
+view and monitoring charts, and dashboards you build yourself from stored
+metrics.
 
 It can also run entry points of whole Python projects (directories with a
 `pyproject.toml`).
@@ -236,6 +237,41 @@ finish any partial line before reporting. Names starting with
 `corral_` and the label `script` are reserved, and a script is limited
 to 2000 series. If two scripts use the same name for different types, the
 second one is left out and noted in a comment at the end of `/metrics`.
+
+## Dashboards
+
+Once a minute corral reads its own `/metrics` page (so the runner's metrics
+and every script's own) and stores each value in SQLite, `metrics.sqlite3`
+in `data_dir`, for 30 days. The **Dashboards** page shows them as graphs:
+
+- Create a dashboard with **New dashboard**, then **Edit** to add panels,
+  drag them by their title bar and resize them from the bottom right corner.
+  Changes are saved as you make them, also in SQLite.
+- A panel shows one metric as a **line chart**, a **stat** (one number, with
+  a small chart when it is one series), a **bar chart** or a **table** (the
+  latest value per series, or their average, maximum or minimum), or a
+  **heatmap** (how a histogram's observations spread over its buckets).
+- Filter on label values, and pick a function: the **value** as stored, a
+  **rate** per second or per minute or the **increase** per step (for
+  counters; a counter that drops is taken to have restarted from zero), or a
+  **quantile** of a histogram. Series can be combined (sum, average,
+  maximum, minimum, count), kept separate by the labels you choose.
+- The range buttons (15 minutes to 30 days) apply to the whole dashboard.
+  Longer ranges add up or take the last value of several scrapes per point.
+
+```toml
+[metrics]
+scrape_interval = "1m"   # how often /metrics is read and stored
+retention = "30d"        # how long stored values are kept
+```
+
+Each series takes roughly 20 bytes per scrape, so under 1 MB per series for
+30 days at the default interval. A histogram is one series per bucket.
+
+The same data is available as JSON: `GET /api/tsdb/metrics` lists the stored
+metrics, `GET /api/tsdb/query?q={"metric": ..., "fn": "rate", ...}&range=3600`
+returns series, and `/api/dashboards` stores dashboards (`POST`, `PUT` and
+`DELETE` need an `X-Corral` header).
 
 ## Development
 
