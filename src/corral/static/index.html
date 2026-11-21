@@ -102,9 +102,6 @@
   /* kiosk: only the panels, for a wall screen */
   body.kiosk header, body.kiosk .dashbar { display: none !important; }
   body.kiosk #dashboard { padding: 12px; }
-  #kioskexit { position: fixed; top: 10px; right: 10px; z-index: 20; opacity: 0; transition: opacity .3s;
-               box-shadow: 0 2px 8px rgba(0, 0, 0, .25); }
-  body.kiosk.awake #kioskexit { opacity: 1; }
   body.kiosk:not(.awake) { cursor: none; }
 
   /* state colours, shared by cards and the script header */
@@ -365,10 +362,9 @@
     <span class="detail" id="dashstatus"></span>
     <button id="addpanel" hidden>Add panel</button>
     <button id="deldash" class="danger" hidden>Delete dashboard</button>
-    <button id="kioskbtn" title="Full screen, panels only">Kiosk</button>
+    <button id="kioskbtn" title="Full screen, panels only (Esc leaves)">Kiosk</button>
     <button id="editdash">Edit</button>
   </div>
-  <button id="kioskexit" hidden>Exit kiosk</button>
   <div id="grid" class="grid"><div id="ghost" class="ghost" hidden></div></div>
 </section>
 
@@ -1734,7 +1730,6 @@ function wakeKiosk() {
 function setKiosk(on) {
   const was = document.body.classList.contains("kiosk");
   document.body.classList.toggle("kiosk", on);
-  $("kioskexit").hidden = !on;
   if (on && dashEditing) setEditing(false);
   if (on && !was) wakeKiosk();
   if (!on && was && document.fullscreenElement) {
@@ -1759,7 +1754,6 @@ $("kioskbtn").onclick = () => {
       .catch(() => {});
   }
 };
-$("kioskexit").onclick = leaveKiosk;
 document.addEventListener("fullscreenchange", () => {
   if (!document.fullscreenElement && kioskFullscreen) {  // Esc in full screen
     kioskFullscreen = false;

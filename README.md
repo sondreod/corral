@@ -254,11 +254,11 @@ in `data_dir`, for 30 days. The **Dashboards** page shows them as graphs:
   maximum, minimum, count), kept separate by the labels you choose.
 - The range buttons (15 minutes to 30 days) apply to the whole dashboard.
   Longer ranges add up or take the last value of several scrapes per point.
-- **Kiosk** shows only the panels, full screen, for a wall screen; Esc or
-  the corner button leaves it. Its link, `#/d/<id>?kiosk`, can be
-  bookmarked, and `&theme=nord` (or another theme) picks the theme for that
-  screen. A browser only goes full screen after a click, so for a screen
-  that opens the link by itself, start the browser in its own kiosk mode
+- **Kiosk** shows only the panels, full screen, for a wall screen; Esc
+  leaves it. Its link, `#/d/<id>?kiosk`, can be bookmarked, and
+  `&theme=nord` (or another theme) picks the theme for that screen. A
+  browser only goes full screen after a click, so for a screen that opens
+  the link by itself, start the browser in its own kiosk mode
   (e.g. `chromium --kiosk 'http://host:8723/#/d/1?kiosk'`).
 
 The theme menu in the header offers auto (follows the system), light,
