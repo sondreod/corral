@@ -1,8 +1,9 @@
-"""Runs the configured scripts and keeps track of their state.
+"""Runs the processes of the configured apps and keeps track of their state.
 
-Each script gets one thread that alternates between waiting for its turn
-(restart backoff, schedule, or being stopped) and running the script once via
-``uv run``.
+Each process gets one thread that alternates between waiting for its turn
+(restart backoff, schedule, or being stopped) and running its Procfile
+command once with ``/bin/sh -c``. (The code calls them scripts, after what
+corral first ran.)
 """
 
 from __future__ import annotations
@@ -17,7 +18,6 @@ from datetime import datetime
 from .config import Config, ScriptConfig
 from .custom import PREFIX as METRIC_PREFIX
 from .custom import MetricError, ScriptMetrics
-from .project import ProjectError, project_command
 from .store import LogStore
 
 # A service that exits sooner than this counts as a failed start, and the
@@ -28,10 +28,9 @@ _MAX_METRIC_COMPLAINTS = 10  # per run
 
 
 class Script:
-    def __init__(self, cfg: ScriptConfig, store: LogStore, uv: str):
+    def __init__(self, cfg: ScriptConfig, store: LogStore):
         self.cfg = cfg
         self._store = store
-        self._uv = uv
 
         self._lock = threading.Lock()
         self._wake = threading.Event()
@@ -94,6 +93,39 @@ class Script:
             self._stop_current()
         self._wake.set()
 
+    def reconfigure(self, cfg: ScriptConfig) -> None:
+        """Take new settings (same name and mode) from a reloaded config.
+        A running service whose command or environment changed is restarted;
+        a scheduled one uses them from its next run."""
+        with self._lock:
+            old, self.cfg = self.cfg, cfg
+            if cfg.enabled != old.enabled:
+                self._enabled = cfg.enabled
+                self._quick_exits = 0
+                self._wait_since = time.time()
+                if not cfg.enabled:
+                    self._run_now = False
+                    self._stop_current()
+                elif cfg.mode == "service":
+                    self._run_now = True
+            elif self._proc is not None and cfg.mode == "service" and (
+                (cfg.command, cfg.cwd, cfg.env, cfg.path) != (old.command, old.cwd, old.env, old.path)
+            ):
+                self._log("configuration changed, restarting")
+                self._quick_exits = 0
+                self._run_now = True
+                self._stop_current()
+        self._wake.set()
+
+    def take_over(self, old: "Script") -> None:
+        """Continue the totals and reported metrics of ``old``, which this
+        replaces, so counters on /metrics do not start again from zero."""
+        with old._lock:
+            self._runs, self._failures = old._runs, old._failures
+        with old._count_lock:
+            self._line_totals = dict(old._line_totals)
+        self.metrics = old.metrics
+
     def shutdown(self) -> None:
         with self._lock:
             self._shutdown = True
@@ -128,8 +160,10 @@ class Script:
         with self._lock:
             return {
                 "name": cfg.name,
-                "path": str(cfg.path or cfg.project),
-                "entrypoint": cfg.entrypoint,
+                "app": cfg.app,
+                "process": cfg.process,
+                "command": cfg.command,
+                "cwd": str(cfg.cwd),
                 "mode": cfg.mode,
                 "schedule": cfg.schedule_text,
                 "state": self._state,
@@ -228,10 +262,11 @@ class Script:
 
     def _run_once(self, gen: int) -> None:
         cfg = self.cfg
-        cmd = None
-        # CORRAL_METRICS tells corral.metrics in the script that
-        # someone is listening for its "@metric" lines.
-        env = {**os.environ, "PYTHONUNBUFFERED": "1", "CORRAL_METRICS": "1", **cfg.env}
+        cmd = ["/bin/sh", "-c", cfg.command]
+        path = os.pathsep.join([*cfg.path, os.environ.get("PATH", os.defpath)])
+        # CORRAL_METRICS tells corral.metrics in the process that someone is
+        # listening for its "@metric" lines.
+        env = {**os.environ, "PATH": path, "PYTHONUNBUFFERED": "1", **cfg.env, "CORRAL_METRICS": "1"}
         started = time.time()
         with self._lock:
             self._state = "starting"
@@ -243,7 +278,6 @@ class Script:
         self._metric_complaints = 0
         self._store.run_started(cfg.name, started)
         try:
-            cmd = self._command()
             proc = subprocess.Popen(
                 cmd,
                 stdin=subprocess.DEVNULL,
@@ -253,8 +287,8 @@ class Script:
                 env=env,
                 start_new_session=True,  # own process group, so we can signal the whole tree
             )
-        except (OSError, ProjectError) as exc:
-            self._log(f"failed to start {cmd[0]!r}: {exc}" if cmd else f"cannot start: {exc}")
+        except OSError as exc:
+            self._log(f"cannot start: {exc}")
             self._store.run_finished(cfg.name, started, time.time(), None, str(exc))
             with self._lock:
                 self._exited_at = time.time()
@@ -263,7 +297,7 @@ class Script:
                 self._failures += 1
             return
 
-        self._log(f"started (pid {proc.pid})")
+        self._log(f"started (pid {proc.pid}): {cfg.command}")
         with self._lock:
             self._proc = proc
             self._state = "running"
@@ -277,8 +311,7 @@ class Script:
         for reader in readers:
             reader.start()
         code = proc.wait()
-        # Anything the script left behind would keep the pipes open forever.
-        _signal_group(proc, signal.SIGKILL)
+        self._drain_group(proc)
         for reader in readers:
             reader.join(5)
 
@@ -306,14 +339,21 @@ class Script:
             else:
                 self._quick_exits = 0
 
-    def _command(self) -> list[str]:
-        cfg = self.cfg
-        if cfg.project is None:
-            return [self._uv, "run", "--quiet", "--script", str(cfg.path), *cfg.args]
-        # The project file is read on every start, so edits to it (a renamed
-        # script, say) apply on the next restart like any other source change.
-        target = project_command(cfg.project, cfg.entrypoint)
-        return [self._uv, "run", "--quiet", "--project", str(cfg.project), *target, *cfg.args]
+    def _drain_group(self, proc: subprocess.Popen) -> None:
+        """The shell has exited. Whatever it left running in its process
+        group (the program itself, if the shell did not exec it, or anything
+        started in the background) gets SIGTERM and ``stop_timeout`` to exit,
+        then SIGKILL: left alone it would keep the output pipes open."""
+        if not _group_alive(proc.pid):
+            return
+        _signal_group(proc, signal.SIGTERM)
+        deadline = time.monotonic() + self.cfg.stop_timeout
+        while time.monotonic() < deadline:
+            if not _group_alive(proc.pid):
+                return
+            time.sleep(0.05)
+        self._log(f"still running after {self.cfg.stop_timeout:g}s, sending SIGKILL")
+        _signal_group(proc, signal.SIGKILL)
 
     def _pump(self, pipe, stream: str) -> None:
         with pipe:
@@ -343,6 +383,16 @@ class Script:
             self._line_totals[stream] += 1
 
 
+def _group_alive(pgid: int) -> bool:
+    try:
+        os.killpg(pgid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
 def _signal_group(proc: subprocess.Popen, sig: int) -> None:
     try:
         os.killpg(proc.pid, sig)
@@ -352,7 +402,43 @@ def _signal_group(proc: subprocess.Popen, sig: int) -> None:
 
 class Supervisor:
     def __init__(self, config: Config, store: LogStore):
-        self.scripts = {s.name: Script(s, store, config.uv) for s in config.scripts}
+        self._store = store
+        self._reload_lock = threading.Lock()
+        self.config = config
+        # Replaced as a whole on reload, so readers can iterate it without a lock.
+        self.scripts = {s.name: Script(s, store) for s in config.scripts}
+
+    def reload(self, config: Config) -> dict:
+        """Apply a re-read config: start new processes, stop removed ones,
+        and update or restart changed ones. Returns what changed."""
+        with self._reload_lock:
+            old = self.scripts
+            new: dict[str, Script] = {}
+            added, changed, removed = [], [], []
+            for cfg in config.scripts:
+                script = old.get(cfg.name)
+                if script is None:
+                    script = Script(cfg, self._store)
+                    script.begin()
+                    added.append(cfg.name)
+                elif script.cfg != cfg:
+                    changed.append(cfg.name)
+                    if script.cfg.mode == cfg.mode:
+                        script.reconfigure(cfg)
+                    else:  # service <-> schedule: a fresh start is simplest
+                        script.shutdown()
+                        replacement = Script(cfg, self._store)
+                        replacement.take_over(script)
+                        replacement.begin()
+                        script = replacement
+                new[cfg.name] = script
+            for name, script in old.items():
+                if name not in new:
+                    script.shutdown()
+                    removed.append(name)
+            self.scripts = new
+            self.config = config
+            return {"added": added, "changed": changed, "removed": removed}
 
     def start(self) -> None:
         for script in self.scripts.values():
@@ -362,8 +448,9 @@ class Supervisor:
         return [s.status() for s in self.scripts.values()]
 
     def shutdown(self) -> None:
-        for script in self.scripts.values():
-            script.shutdown()
+        with self._reload_lock:
+            for script in self.scripts.values():
+                script.shutdown()
         deadline = time.monotonic() + max(
             (s.cfg.stop_timeout for s in self.scripts.values()), default=0
         ) + 5

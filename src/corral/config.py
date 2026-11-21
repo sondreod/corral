@@ -12,10 +12,11 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .project import ENTRYPOINT_RE
+from .procfile import ProcfileError, read_env, read_procfile
 from .schedule import Cron, parse_duration
 
-NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+# No dots: a process is named "<app>.<process>".
+APP_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 
 
 class ConfigError(ValueError):
@@ -24,24 +25,29 @@ class ConfigError(ValueError):
 
 @dataclass(frozen=True)
 class ScriptConfig:
-    name: str
-    # Exactly one of these is set: a PEP 723 script, or a project directory
-    # (containing pyproject.toml) of which ``entrypoint`` is run.
-    path: Path | None = None
-    project: Path | None = None
-    entrypoint: str | None = None
-    mode: str = "service"  # "service" or "schedule"
-    args: tuple[str, ...] = ()
+    """One process of an app: a line of its Procfile plus the settings for it."""
+
+    name: str  # "<app>.<process>"
+    command: str  # run with /bin/sh -c in ``cwd``
+    cwd: Path = Path(".")
+    app: str = ""
+    process: str = ""
+    # The app's .env, then its env table, then the process's (later wins).
     env: dict[str, str] = field(default_factory=dict)
-    cwd: Path | None = None
+    # Directories put in front of PATH ([runner] path).
+    path: tuple[str, ...] = ()
     enabled: bool = True
-    # service mode
+    # services
     restart_delay: float = 2.0
     max_restart_delay: float = 60.0
-    # schedule mode: exactly one of these is set
+    # scheduled: at most one of these is set; neither means a service
     every: float | None = None
     cron: Cron | None = None
     stop_timeout: float = 10.0
+
+    @property
+    def mode(self) -> str:
+        return "schedule" if self.every is not None or self.cron is not None else "service"
 
     @property
     def schedule_text(self) -> str | None:
@@ -53,20 +59,28 @@ class ScriptConfig:
 
 
 @dataclass(frozen=True)
+class AppConfig:
+    name: str
+    dir: Path
+    procfile: Path
+
+
+@dataclass(frozen=True)
 class Config:
     host: str = "127.0.0.1"
     port: int = 8723
     # Host names the web interface answers to besides localhost; "*" for any.
     allowed_hosts: tuple[str, ...] = ()
     data_dir: Path = Path("/var/lib/corral")
-    uv: str = "uv"
+    path: tuple[str, ...] = ()
     max_log_lines: int = 100_000
     sample_interval: float = 10.0
     history_days: float = 7.0
     # stored metrics: how often /metrics is scraped, and how long samples are kept
     scrape_interval: float = 60.0
     metrics_retention: float = 30 * 86400.0
-    scripts: tuple[ScriptConfig, ...] = ()
+    apps: tuple[AppConfig, ...] = ()
+    scripts: tuple[ScriptConfig, ...] = ()  # every process of every app
 
 
 def _take(table: dict, key: str, kind, default):
@@ -89,11 +103,10 @@ def _positive(key: str, value: float) -> float:
     return value
 
 
-def _table(raw: dict, key: str) -> dict:
+def _table(raw: dict, key: str, form: str | None = None) -> dict:
     value = raw.pop(key, {})
     if not isinstance(value, dict):
-        form = f"[{key}.<name>]" if key == "scripts" else f"[{key}]"
-        raise ConfigError(f"{key!r} must be a table, written {form}")
+        raise ConfigError(f"{key!r} must be a table, written {form or f'[{key}]'}")
     return dict(value)
 
 
@@ -102,77 +115,92 @@ def _no_leftovers(table: dict, where: str) -> None:
         raise ConfigError(f"unknown key(s) in {where}: {', '.join(sorted(table))}")
 
 
-def _script(name: str, table: dict, base: Path) -> ScriptConfig:
-    if not NAME_RE.match(name):
-        raise ConfigError("name may only contain letters, digits, '_', '.' and '-'")
-    table = dict(table)
-    path = _take(table, "path", str, None)
-    project = _take(table, "project", str, None)
-    entrypoint = _take(table, "entrypoint", str, None)
-    if bool(path) == bool(project):
-        raise ConfigError("exactly one of 'path' (a script) or 'project' (a directory) is required")
-    if entrypoint is not None:
-        if not project:
-            raise ConfigError("'entrypoint' is only valid together with 'project'")
-        if not ENTRYPOINT_RE.match(entrypoint):
-            raise ConfigError(
-                f"invalid entrypoint {entrypoint!r}: use a script name from [project.scripts]"
-                " or a 'module:function' reference"
-            )
-    mode = _take(table, "mode", str, "service")
-    if mode not in ("service", "schedule"):
-        raise ConfigError("'mode' must be \"service\" or \"schedule\"")
-
-    args = _take(table, "args", list, [])
+def _env(table: dict) -> dict[str, str]:
     env = _take(table, "env", dict, {})
-    if not all(isinstance(a, str) for a in args):
-        raise ConfigError("'args' must be a list of strings")
     if not all(isinstance(v, str) for v in env.values()):
         raise ConfigError("'env' values must be strings")
-    cwd = _take(table, "cwd", str, None)
-    if cwd == "":
-        raise ConfigError("'cwd' must not be empty")
+    return env
 
-    every = cron = None
+
+def _process_settings(table: dict, defaults: dict) -> dict:
+    """Settings an app gives all its processes and a process may override."""
+    out = dict(defaults)
+    if "enabled" in table:
+        out["enabled"] = _take(table, "enabled", bool, True)
+    for key in ("restart_delay", "max_restart_delay", "stop_timeout"):
+        if key in table:
+            out[key] = _positive(key, _take(table, key, float, 0.0))
+    if out["max_restart_delay"] < out["restart_delay"]:
+        raise ConfigError("'max_restart_delay' must not be less than 'restart_delay'")
+    return out
+
+
+def _schedule(table: dict) -> dict:
     every_raw = table.pop("every", None)
     cron_raw = _take(table, "cron", str, None)
-    if mode == "schedule":
-        if (every_raw is None) == (cron_raw is None):
-            raise ConfigError("schedule mode needs exactly one of 'every' or 'cron'")
-        try:
-            if every_raw is not None:
-                every = parse_duration(every_raw)
-            else:
-                cron = Cron(cron_raw)
-        except ValueError as exc:
-            raise ConfigError(str(exc)) from None
-    elif every_raw is not None or cron_raw is not None:
-        raise ConfigError("'every' and 'cron' are only valid with mode = \"schedule\"")
+    if every_raw is not None and cron_raw is not None:
+        raise ConfigError("give either 'every' or 'cron', not both")
+    try:
+        if every_raw is not None:
+            return {"every": parse_duration(every_raw)}
+        if cron_raw is not None:
+            return {"cron": Cron(cron_raw)}
+    except ValueError as exc:
+        raise ConfigError(str(exc)) from None
+    return {}
 
-    restart_delay = _positive("restart_delay", _take(table, "restart_delay", float, 2.0))
-    max_restart_delay = _positive("max_restart_delay", _take(table, "max_restart_delay", float, 60.0))
-    if max_restart_delay < restart_delay:
-        raise ConfigError("'max_restart_delay' must not be less than 'restart_delay'")
-    stop_timeout = _positive("stop_timeout", _take(table, "stop_timeout", float, 10.0))
 
-    cfg = ScriptConfig(
-        name=name,
-        path=base / path if path else None,
-        project=base / project if project else None,
-        entrypoint=entrypoint,
-        mode=mode,
-        args=tuple(args),
-        env=env,
-        cwd=base / cwd if cwd else None,
-        enabled=_take(table, "enabled", bool, True),
-        restart_delay=restart_delay,
-        max_restart_delay=max_restart_delay,
-        every=every,
-        cron=cron,
-        stop_timeout=stop_timeout,
+def _app(name: str, table: dict, base: Path, path: tuple[str, ...]) -> tuple[AppConfig, list[ScriptConfig]]:
+    if not APP_RE.match(name):
+        raise ConfigError("name may only contain letters, digits, '_' and '-'")
+    table = dict(table)
+    dir_raw = _take(table, "dir", str, None)
+    if not dir_raw:
+        raise ConfigError("'dir' (the folder with the Procfile) is required")
+    app_dir = base / dir_raw
+    procfile = app_dir / _take(table, "procfile", str, "Procfile")
+    app_env = _env(table)
+    defaults = _process_settings(
+        table,
+        {"enabled": True, "restart_delay": 2.0, "max_restart_delay": 60.0, "stop_timeout": 10.0},
     )
-    _no_leftovers(table, "script")
-    return cfg
+    overrides = table.pop("processes", {})
+    if not isinstance(overrides, dict):
+        raise ConfigError("'processes' must be a table, written [apps.<app>.processes.<process>]")
+    _no_leftovers(table, f"[apps.{name}]")
+
+    try:
+        commands = read_procfile(procfile)
+        dotenv = read_env(app_dir / ".env")
+    except ProcfileError as exc:
+        raise ConfigError(str(exc)) from None
+    unknown = sorted(set(overrides) - set(commands))
+    if unknown:
+        raise ConfigError(
+            f"{procfile} has no process named {', '.join(map(repr, unknown))}"
+            f" (it has {', '.join(commands)})"
+        )
+
+    scripts = []
+    for process, command in commands.items():
+        own = overrides.get(process, {})
+        if not isinstance(own, dict):
+            raise ConfigError(f"[apps.{name}.processes.{process}] must be a table")
+        own = dict(own)
+        try:
+            env = {**dotenv, **app_env, **_env(own)}
+            settings = _process_settings(own, defaults)
+            schedule = _schedule(own)
+            _no_leftovers(own, f"[apps.{name}.processes.{process}]")
+        except ConfigError as exc:
+            raise ConfigError(f"[processes.{process}]: {exc}") from None
+        scripts.append(
+            ScriptConfig(
+                name=f"{name}.{process}", command=command, cwd=app_dir, app=name, process=process,
+                env=env, path=path, **settings, **schedule,
+            )
+        )
+    return AppConfig(name, app_dir, procfile), scripts
 
 
 def load_config(path: str | Path) -> Config:
@@ -185,13 +213,18 @@ def load_config(path: str | Path) -> Config:
     except tomllib.TOMLDecodeError as exc:
         raise ConfigError(f"{path}: {exc}") from None
 
+    if "scripts" in raw:
+        raise ConfigError(
+            f"{path}: [scripts.*] is no longer supported; put the commands in a Procfile"
+            " and point [apps.<name>] dir at its folder"
+        )
     # Relative paths in the file are relative to the file itself.
     base = path.resolve().parent
     try:
         server = _table(raw, "server")
         runner = _table(raw, "runner")
         metrics = _table(raw, "metrics")
-        scripts_raw = _table(raw, "scripts")
+        apps_raw = _table(raw, "apps", "[apps.<name>]")
         _no_leftovers(raw, "top level")
 
         host = _take(server, "host", str, "127.0.0.1")
@@ -209,9 +242,15 @@ def load_config(path: str | Path) -> Config:
         if not data_dir_raw:
             raise ConfigError("'data_dir' must not be empty")
         data_dir = base / data_dir_raw
-        uv = _take(runner, "uv", str, "uv")
-        if not uv:
-            raise ConfigError("'uv' must not be empty")
+        if "uv" in runner:
+            raise ConfigError(
+                "'uv' is no longer used: Procfile commands run as written; add the folder"
+                " with uv to 'path' if it is not on PATH"
+            )
+        path_raw = _take(runner, "path", list, [])
+        if not all(isinstance(d, str) and d for d in path_raw):
+            raise ConfigError("'path' must be a list of directories")
+        path_dirs = tuple(str(base / d) for d in path_raw)
         max_log_lines = _take(runner, "max_log_lines", int, 100_000)
         try:
             sample_interval = parse_duration(runner.pop("sample_interval", 10))
@@ -240,25 +279,28 @@ def load_config(path: str | Path) -> Config:
     except ConfigError as exc:
         raise ConfigError(f"{path}: {exc}") from None
 
-    scripts = []
-    for name, table in scripts_raw.items():
+    apps, scripts = [], []
+    for name, table in apps_raw.items():
         try:
             if not isinstance(table, dict):
                 raise ConfigError("must be a table")
-            scripts.append(_script(name, table, base))
+            app, processes = _app(name, table, base, path_dirs)
         except ConfigError as exc:
-            raise ConfigError(f"{path}: [scripts.{name}]: {exc}") from None
+            raise ConfigError(f"{path}: [apps.{name}]: {exc}") from None
+        apps.append(app)
+        scripts.extend(processes)
 
     return Config(
         host=host,
         port=port,
         allowed_hosts=tuple(h.strip().lower() for h in allowed_hosts),
         data_dir=data_dir,
-        uv=uv,
+        path=path_dirs,
         max_log_lines=max_log_lines,
         sample_interval=sample_interval,
         history_days=history_days,
         scrape_interval=scrape_interval,
         metrics_retention=metrics_retention,
+        apps=tuple(apps),
         scripts=tuple(scripts),
     )

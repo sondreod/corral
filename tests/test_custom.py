@@ -7,7 +7,7 @@ from corral import prometheus
 from corral.custom import MAX_SERIES, MetricError, ScriptMetrics
 
 from test_prometheus import parse
-from test_supervisor import fake_uv, harness, logged, script, wait_for  # noqa: F401  (fixtures)
+from test_supervisor import harness, logged, script, wait_for  # noqa: F401  (fixtures)
 
 
 def send(metrics, **message):
@@ -251,7 +251,7 @@ def test_scripts_disagreeing_about_a_type():
     send(first, name="rows", op="set", value=1)
     send(second, name="rows", op="observe", value=1)
     send(third, name="rows", op="set", value=3)
-    scripts = {n: SimpleNamespace(metrics=m) for n, m in (("a", first), ("b", second), ("c", third))}
+    scripts = {n: SimpleNamespace(metrics=m, cfg=SimpleNamespace(app="")) for n, m in (("a", first), ("b", second), ("c", third))}
     lines = prometheus._custom(SimpleNamespace(scripts=scripts), set())
     assert lines == [
         "# TYPE rows gauge",

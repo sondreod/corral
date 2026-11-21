@@ -6,7 +6,7 @@ import pytest
 
 from corral.web import host_filter, make_server
 
-from test_supervisor import fake_uv, harness, script  # noqa: F401  (fixtures)
+from test_supervisor import harness, script  # noqa: F401  (fixtures)
 
 
 @pytest.mark.parametrize(

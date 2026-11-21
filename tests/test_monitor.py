@@ -4,12 +4,12 @@ import time
 
 import pytest
 
-from corral.config import Config, ScriptConfig
+from corral.config import Config
 from corral.monitor import Monitor, ProcInfo, parse_stat, process_tree
 from corral.store import LogStore
 from corral.supervisor import Supervisor
 
-from test_supervisor import fake_uv, wait_for  # noqa: F401  (fake_uv is a fixture)
+from test_supervisor import script as make_script, wait_for
 
 needs_proc = pytest.mark.skipif(not os.path.exists("/proc/self/stat"), reason="needs Linux /proc")
 
@@ -46,7 +46,7 @@ def test_process_tree_follows_children_and_session():
 
 
 @needs_proc
-def test_sampling_a_running_script(tmp_path, fake_uv):  # noqa: F811
+def test_sampling_a_running_script(tmp_path):
     body = (
         "import subprocess, sys, time\n"
         "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
@@ -54,10 +54,8 @@ def test_sampling_a_running_script(tmp_path, fake_uv):  # noqa: F811
         "end = time.time() + 60\n"
         "while time.time() < end: pass\n"  # burn CPU so there is something to measure
     )
-    path = tmp_path / "busy.py"
-    path.write_text(body)
     store = LogStore(tmp_path / "db")
-    supervisor = Supervisor(Config(uv=fake_uv, scripts=(ScriptConfig(name="busy", path=path),)), store)
+    supervisor = Supervisor(Config(scripts=(make_script(tmp_path, "busy", body),)), store)
     monitor = Monitor(supervisor, store, interval=3600, retention_days=7)  # sampled by hand below
     supervisor.start()
     try:

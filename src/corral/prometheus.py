@@ -1,10 +1,12 @@
 """The runner's own metrics in the Prometheus text exposition format.
 
-Everything is labelled with the script's name. After the runner's own
-metrics come the ones scripts report themselves (see ``custom``). Counters start at zero when
-the runner starts. Resource figures come from the monitor's most recent
-sample, so they are up to one ``sample_interval`` old, and are only present
-while the script is running.
+Everything is labelled with the process's name (``script``, e.g.
+``shop.web``; the name dates from when corral ran scripts) and its app
+(``app``). After the runner's own metrics come the ones processes report
+themselves (see ``custom``). Counters start at zero when the runner starts.
+Resource figures come from the monitor's most recent sample, so they are up
+to one ``sample_interval`` old, and are only present while the process is
+running.
 """
 
 from __future__ import annotations
@@ -92,28 +94,34 @@ def render(supervisor: Supervisor, monitor: Monitor | None = None) -> str:
 
     for name, script in supervisor.scripts.items():
         status, counters = script.status(), script.counters()
+        ids = _ids(name, script)
         for candidate in STATES:
-            state.add(int(status["state"] == candidate), script=name, state=candidate)
-        enabled.add(int(status["enabled"]), script=name)
-        up.add(int(status["pid"] is not None), script=name)
-        runs.add(counters["runs"], script=name)
-        failures.add(counters["failures"], script=name)
+            state.add(int(status["state"] == candidate), **ids, state=candidate)
+        enabled.add(int(status["enabled"]), **ids)
+        up.add(int(status["pid"] is not None), **ids)
+        runs.add(counters["runs"], **ids)
+        failures.add(counters["failures"], **ids)
         for stream, count in counters["lines"].items():
-            lines.add(count, script=name, stream=stream)
-        exit_code.add(status["exit_code"], script=name)
-        started.add(status["started_at"], script=name)
-        exited.add(status["exited_at"], script=name)
-        next_run.add(status["next_run"], script=name)
+            lines.add(count, **ids, stream=stream)
+        exit_code.add(status["exit_code"], **ids)
+        started.add(status["started_at"], **ids)
+        exited.add(status["exited_at"], **ids)
+        next_run.add(status["next_run"], **ids)
         if monitor is not None:
-            cpu.add(monitor.cpu_seconds(name), script=name)
+            cpu.add(monitor.cpu_seconds(name), **ids)
             usage = monitor.latest(name) or {}
-            memory.add(usage.get("rss"), script=name)
-            threads.add(usage.get("threads"), script=name)
-            fds.add(usage.get("fds"), script=name)
+            memory.add(usage.get("rss"), **ids)
+            threads.add(usage.get("threads"), **ids)
+            fds.add(usage.get("fds"), **ids)
 
     lines_out = [line for f in families for line in f.lines()]
     lines_out += _custom(supervisor, {f.name for f in families})
     return "\n".join(lines_out) + "\n"
+
+
+def _ids(name: str, script) -> dict[str, str]:
+    """The labels that say which process a sample is about."""
+    return {"script": name, "app": script.cfg.app} if script.cfg.app else {"script": name}
 
 
 def _custom(supervisor: Supervisor, taken: set[str]) -> list[str]:
@@ -130,7 +138,7 @@ def _custom(supervisor: Supervisor, taken: set[str]) -> list[str]:
             if name not in merged:
                 merged[name] = (kind, help, [])
             merged[name][2].extend(
-                f"{sample}{_labels({'script': script_name, **labels})} {_number(value)}"
+                f"{sample}{_labels({**_ids(script_name, script), **labels})} {_number(value)}"
                 for sample, labels, value in samples
             )
     out = []

@@ -1,6 +1,7 @@
 # corral configuration.
 # Check it with:    corral --check
-# Apply changes:    systemctl restart corral
+# Apply changes:    systemctl reload corral   (apps, processes, .env files)
+#                   systemctl restart corral  ([server], [runner] and [metrics])
 
 [server]
 # Address of the web interface. There is no authentication, so only change
@@ -17,58 +18,54 @@ port = 8723
 [runner]
 # Where the log and metrics databases live.
 data_dir = "/var/lib/corral"
-# The uv executable used to run scripts ("uv run --script"). Give a full path
-# if uv is not on the service's PATH (/usr/local/bin, /usr/bin, ...).
-uv = "uv"
-# Log lines kept per script; the oldest are dropped beyond this.
+# Directories put in front of PATH for every process, for programs (such as
+# uv) that are not in the service's PATH (/usr/local/bin, /usr/bin, ...).
+# path = ["/opt/uv/bin"]
+# Log lines kept per process; the oldest are dropped beyond this.
 max_log_lines = 100000
-# How often CPU, memory, threads and open files of each script are measured
+# How often CPU, memory, threads and open files of each process are measured
 # for the dashboard, and how many days of that history (and of the list of
 # runs) are kept.
 sample_interval = "10s"
 history_days = 7
 
 [metrics]
-# How often corral reads its own /metrics page (which includes the scripts'
+# How often corral reads its own /metrics page (which includes the processes'
 # own metrics) and stores every value, for the graphs on the Dashboards page.
 scrape_interval = "1m"
 # How long stored values are kept. Each series takes roughly 20 bytes per
 # scrape: 30 days at one a minute is under 1 MB per series.
 retention = "30d"
 
-# One table per script or project entry point. Relative paths are relative to
-# this file's directory, so scripts can live in /etc/corral/scripts/.
-# Examples to copy are in /usr/share/doc/corral/examples/.
+# One table per app: a folder with a Procfile, one process per line:
 #
-# A long-running script, restarted whenever it exits:
+#     web: uv run --script app.py --port 8000
+#     worker: uv run --project . myapp-worker
+#     report: ./report.sh
 #
-# [scripts.ticker]
-# path = "scripts/ticker.py"
-# mode = "service"            # the default
-# args = ["--interval", "5"]
-# env = { GREETING = "hello" }
-# cwd = "/var/lib/corral"
-# restart_delay = 2           # seconds; doubles after each quick exit...
-# max_restart_delay = 60      # ...up to this
-# stop_timeout = 10           # seconds between SIGTERM and SIGKILL
-# enabled = true              # false: only started from the web interface
+# Each line runs with /bin/sh in that folder, as the corral user, and shows
+# up as "<app>.<process>" (e.g. shop.web). KEY=value lines in the folder's
+# .env file are added to the environment. Examples are in
+# /usr/share/doc/corral/examples/. uv keeps its cache in /var/cache/corral;
+# `uv run --project` creates .venv in the project folder, so the corral user
+# must be able to write there.
 #
-# An entry point of a Python project, instead of a single script. `project` is
-# a directory containing pyproject.toml; everything else works as above.
-# uv creates .venv (and uv.lock, if missing) inside that directory, so the
-# corral user must be able to write to it.
+# [apps.shop]
+# dir = "/srv/shop"            # relative paths are relative to this file
+# procfile = "Procfile"        # the default
+# env = { LOG_LEVEL = "info" } # for every process; wins over .env
+# restart_delay = 2            # seconds; doubles after each quick exit...
+# max_restart_delay = 60       # ...up to this
+# stop_timeout = 10            # seconds between SIGTERM and SIGKILL
+# enabled = true               # false: only started from the web interface
 #
-# [scripts.api]
-# project = "/srv/myapp"
-# entrypoint = "myapp-serve"       # a script name from [project.scripts]...
-# # entrypoint = "myapp.jobs:main" # ...or module:function, as in pyproject.toml
-# #                                # (optional if the project declares exactly
-# #                                # one script)
-# args = ["--port", "8000"]
+# Every process is a long-running service, restarted whenever it exits,
+# unless it gets a schedule here. Processes accept the same settings as the
+# app, which they override:
 #
-# A job that runs to completion on a schedule (never overlapping itself):
-#
-# [scripts.report]
-# path = "scripts/report.py"
-# mode = "schedule"
-# every = "15m"               # or: cron = "30 6 * * 1-5"  (local time)
+# [apps.shop.processes.report]
+# every = "15m"                # or: cron = "30 6 * * 1-5"  (local time)
+#                              # a scheduled run never overlaps the previous one
+# [apps.shop.processes.worker]
+# env = { QUEUE = "default" }
+# stop_timeout = 60

@@ -6,6 +6,7 @@
     GET  /api/scripts/<name>/metrics       resource history (see ``_metrics``)
     GET  /api/scripts/<name>/runs          recent runs, newest first
     POST /api/scripts/<name>/<action>      action is start, stop or restart
+    POST /api/reload                       re-read the config, Procfiles and .env files
     GET  /api/tsdb/metrics                 stored metrics, their kinds and label values
     GET  /api/tsdb/query                   series for a chart (see ``_query``)
     GET  /api/dashboards                   saved dashboards
@@ -30,6 +31,7 @@ from . import prometheus
 from .monitor import Monitor
 from .store import STREAMS, LogStore
 from .supervisor import Supervisor
+from .config import ConfigError
 from .tsdb import MetricDB, NotFound, QueryError
 
 ACTIONS = ("start", "stop", "restart")
@@ -109,6 +111,7 @@ class Handler(BaseHTTPRequestHandler):
     store: LogStore
     monitor: Monitor | None
     tsdb: MetricDB | None = None
+    reload: Callable[[], dict] | None = None
     host_ok: Callable[[str], bool] | None = None
 
     def log_message(self, format, *args):  # keep the journal quiet
@@ -148,6 +151,13 @@ class Handler(BaseHTTPRequestHandler):
             elif method == "GET" and parts == ["metrics"]:
                 text = prometheus.render(self.supervisor, self.monitor)
                 self._send(HTTPStatus.OK, text.encode(), prometheus.CONTENT_TYPE)
+            elif method == "POST" and parts == ["api", "reload"]:
+                if self.reload is None:
+                    raise _Error(HTTPStatus.NOT_FOUND, "reloading is not available")
+                try:
+                    self._json(self.reload())
+                except ConfigError as exc:
+                    raise _Error(HTTPStatus.BAD_REQUEST, str(exc)) from None
             elif method == "GET" and parts == ["api", "scripts"]:
                 self._json({"scripts": [self._status(s) for s in self.supervisor.scripts.values()]})
             elif len(parts) == 4 and parts[:2] == ["api", "scripts"]:
@@ -297,6 +307,7 @@ def make_server(
     monitor: Monitor | None = None,
     allowed_hosts=(),
     tsdb: MetricDB | None = None,
+    reload: Callable[[], dict] | None = None,
 ) -> ThreadingHTTPServer:
     check = host_filter(host, allowed_hosts)
     handler = type(
@@ -304,7 +315,8 @@ def make_server(
         (Handler,),
         # staticmethod, or the function would be bound to the handler instance
         {"supervisor": supervisor, "store": store, "monitor": monitor, "tsdb": tsdb,
-         "host_ok": staticmethod(check) if check else None},
+         "host_ok": staticmethod(check) if check else None,
+         "reload": staticmethod(reload) if reload else None},
     )
     server = ThreadingHTTPServer((host, port), handler)
     server.daemon_threads = True

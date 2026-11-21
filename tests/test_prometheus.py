@@ -6,7 +6,7 @@ from corral import prometheus
 from corral.monitor import Monitor
 from corral.web import make_server
 
-from test_supervisor import fake_uv, harness, script, wait_for  # noqa: F401  (fixtures)
+from test_supervisor import harness, script, wait_for  # noqa: F401  (fixtures)
 
 SAMPLE = re.compile(r'^([a-z_]+)(?:\{(.*)\})? (-?[0-9.e+-]+)$')
 
@@ -38,7 +38,7 @@ def test_label_escaping():
 
 def test_metrics_endpoint(tmp_path, harness):  # noqa: F811
     svc = script(tmp_path, "svc", "import sys, time\nprint('a')\nprint('b')\nprint('c', file=sys.stderr)\ntime.sleep(60)\n")
-    bad = script(tmp_path, "bad", "raise SystemExit(3)\n", mode="schedule", every=3600.0)
+    bad = script(tmp_path, "bad", "raise SystemExit(3)\n", every=3600.0)
     supervisor, store = harness(svc, bad)
     monitor = Monitor(supervisor, store, interval=3600, retention_days=7)  # sampled by hand
     server = make_server("127.0.0.1", 0, supervisor, store, monitor)

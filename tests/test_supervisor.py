@@ -1,13 +1,12 @@
 """End-to-end tests of the supervisor and web API.
 
-A stand-in for uv is used so the tests need neither uv nor the network: it
-accepts ``run --quiet --script <path> [args...]`` and runs the script with the
-current interpreter.
+Processes are small Python scripts run with the current interpreter, so the
+tests need neither uv nor the network.
 """
 
 import json
 import os
-import stat
+import shlex
 import sys
 import threading
 import time
@@ -16,6 +15,8 @@ import urllib.request
 
 import pytest
 
+from dataclasses import replace
+
 from corral.config import Config, ScriptConfig
 from corral.store import LogStore
 from corral.supervisor import Supervisor
@@ -23,20 +24,12 @@ from corral.web import make_server
 
 
 @pytest.fixture
-def fake_uv(tmp_path):
-    path = tmp_path / "fake-uv"
-    path.write_text(f'#!/bin/sh\n[ "$1 $2 $3" = "run --quiet --script" ] || exit 99\nshift 3\nexec {sys.executable} "$@"\n')
-    path.chmod(path.stat().st_mode | stat.S_IEXEC)
-    return str(path)
-
-
-@pytest.fixture
-def harness(tmp_path, fake_uv):
+def harness(tmp_path):
     created = []
 
-    def make(*scripts, uv=fake_uv):
+    def make(*scripts):
         store = LogStore(tmp_path / "logs.sqlite3")
-        supervisor = Supervisor(Config(uv=uv, scripts=scripts), store)
+        supervisor = Supervisor(Config(scripts=scripts), store)
         created.append((supervisor, store))
         supervisor.start()
         return supervisor, store
@@ -47,10 +40,12 @@ def harness(tmp_path, fake_uv):
         store.close()
 
 
-def script(tmp_path, name, body, **kwargs):
+def script(tmp_path, name, body, args=(), **kwargs):
+    """A process running ``body`` as a Python script, as a Procfile line would."""
     path = tmp_path / f"{name}.py"
     path.write_text(body)
-    return ScriptConfig(name=name, path=path, **kwargs)
+    command = shlex.join([sys.executable, str(path), *args])
+    return ScriptConfig(name=name, command=command, cwd=tmp_path, **kwargs)
 
 
 def wait_for(predicate, timeout=10.0):
@@ -130,7 +125,7 @@ def test_sigkill_after_stop_timeout_and_orphans_cleaned(tmp_path, harness):
 
     svc.stop()
     wait_for(lambda: svc.status()["state"] == "stopped")
-    assert "killed by SIGKILL" in logged(store, "stubborn", "runner")
+    assert "still running after 0.3s, sending SIGKILL" in logged(store, "stubborn", "runner")
 
     def child_gone():
         try:
@@ -145,7 +140,7 @@ def test_sigkill_after_stop_timeout_and_orphans_cleaned(tmp_path, harness):
 
 
 def test_schedule_every(tmp_path, harness):
-    cfg = script(tmp_path, "job", "print('ran')\n", mode="schedule", every=0.3)
+    cfg = script(tmp_path, "job", "print('ran')\n", every=0.3)
     supervisor, store = harness(cfg)
     job = supervisor.scripts["job"]
     wait_for(lambda: job.status()["runs"] >= 3)
@@ -166,7 +161,7 @@ def test_schedule_every(tmp_path, harness):
 def test_schedule_cron_waits(tmp_path, harness):
     from corral.schedule import Cron
 
-    cfg = script(tmp_path, "job", "print('ran')\n", mode="schedule", cron=Cron("0 0 1 1 *"))
+    cfg = script(tmp_path, "job", "print('ran')\n", cron=Cron("0 0 1 1 *"))
     supervisor, _ = harness(cfg)
     job = supervisor.scripts["job"]
     status = wait_for(lambda: (s := job.status())["state"] == "waiting" and s)
@@ -180,13 +175,64 @@ def test_disabled_script_does_not_start(tmp_path, harness):
     assert supervisor.scripts["off"].status()["state"] == "stopped"
 
 
-def test_missing_uv_is_reported_with_backoff(tmp_path, harness):
-    cfg = script(tmp_path, "svc", "print('x')\n", restart_delay=0.1)
-    supervisor, store = harness(cfg, uv=str(tmp_path / "no-such-uv"))
+def test_unknown_command_is_reported_with_backoff(tmp_path, harness):
+    cfg = ScriptConfig(name="svc", command="no-such-command-here --flag", cwd=tmp_path, restart_delay=0.1)
+    supervisor, store = harness(cfg)
     svc = supervisor.scripts["svc"]
     wait_for(lambda: svc.status()["runs"] >= 2)
-    assert any("failed to start" in l for l in logged(store, "svc", "runner"))
-    assert svc.status()["exit_code"] is None
+    assert "exited with code 127" in logged(store, "svc", "runner")  # the shell's "not found"
+    assert any("not found" in l for l in logged(store, "svc", "stderr"))
+    assert svc.status()["exit_code"] == 127
+
+
+def test_shell_command_environment_and_cwd(tmp_path, harness):
+    (tmp_path / "bin").mkdir()
+    tool = tmp_path / "bin" / "greet"
+    tool.write_text("#!/bin/sh\necho \"hello $1\"\n")
+    tool.chmod(0o755)
+    cfg = ScriptConfig(
+        name="app.web", app="app", process="web", cwd=tmp_path, path=(str(tmp_path / "bin"),),
+        command='greet "$WHO" && pwd && echo "metrics=$CORRAL_METRICS" >&2 && sleep 60',
+        env={"WHO": "world", "CORRAL_METRICS": "0"},
+    )
+    supervisor, store = harness(cfg)
+    wait_for(lambda: len(logged(store, "app.web", "stdout")) == 2)
+    assert logged(store, "app.web", "stdout") == ["hello world", str(tmp_path)]
+    assert logged(store, "app.web", "stderr") == ["metrics=1"]  # always set by corral
+    status = supervisor.scripts["app.web"].status()
+    assert (status["app"], status["process"], status["command"]) == ("app", "web", cfg.command)
+
+
+def test_reload(tmp_path, harness):
+    svc = script(tmp_path, "svc", "import os, time\nprint('v', os.environ.get('V'), flush=True)\ntime.sleep(60)\n")
+    gone = script(tmp_path, "gone", "import time\ntime.sleep(60)\n")
+    job = script(tmp_path, "job", "print('job ran')\n", every=3600.0)
+    supervisor, store = harness(svc, gone, job)
+    wait_for(lambda: logged(store, "svc", "stdout") == ["v None"])
+    wait_for(lambda: supervisor.scripts["gone"].status()["state"] == "running")
+    wait_for(lambda: supervisor.scripts["job"].status()["runs"] == 1)
+    first_pid = supervisor.scripts["svc"].status()["pid"]
+    old_job = supervisor.scripts["job"]
+
+    new = script(tmp_path, "new", "import time\nprint('new up')\ntime.sleep(60)\n")
+    job_as_service = script(tmp_path, "job", "import time\nprint('job up')\ntime.sleep(60)\n")
+    result = supervisor.reload(Config(scripts=(replace(svc, env={"V": "2"}), new, job_as_service)))
+    assert result == {"added": ["new"], "changed": ["svc", "job"], "removed": ["gone"]}
+
+    assert "gone" not in supervisor.scripts
+    wait_for(lambda: "killed by SIGTERM" in logged(store, "gone", "runner"))
+    wait_for(lambda: logged(store, "svc", "stdout") == ["v None", "v 2"])  # restarted with the new env
+    assert supervisor.scripts["svc"].status()["pid"] != first_pid
+    assert "configuration changed, restarting" in logged(store, "svc", "runner")
+    wait_for(lambda: "new up" in logged(store, "new"))
+    # the mode changed, so "job" is a new Script that kept the old one's totals
+    assert supervisor.scripts["job"] is not old_job
+    wait_for(lambda: "job up" in logged(store, "job"))
+    assert supervisor.scripts["job"].counters()["runs"] == 2
+
+    unchanged = supervisor.scripts["svc"]
+    assert supervisor.reload(supervisor.config) == {"added": [], "changed": [], "removed": []}
+    assert supervisor.scripts["svc"] is unchanged
 
 
 def test_web_api(tmp_path, harness):
@@ -244,33 +290,3 @@ def test_web_api(tmp_path, harness):
     finally:
         server.shutdown()
         server.server_close()
-
-
-def test_project_problem_is_reported(tmp_path, harness):
-    project = tmp_path / "proj"
-    project.mkdir()
-    (project / "pyproject.toml").write_text(
-        '[project]\nname = "demo"\n[project.scripts]\na = "demo:a"\nb = "demo:b"\n'
-    )
-    cfg = ScriptConfig(name="app", project=project, entrypoint="missing", restart_delay=0.1)
-    supervisor, store = harness(cfg)
-    app = supervisor.scripts["app"]
-    wait_for(lambda: app.status()["runs"] >= 2)
-    assert any("cannot start" in l and "declared: a, b" in l for l in logged(store, "app", "runner"))
-    assert app.status()["exit_code"] is None and app.status()["entrypoint"] == "missing"
-
-
-def test_project_command_line(tmp_path, fake_uv):
-    project = tmp_path / "proj"
-    project.mkdir()
-    (project / "pyproject.toml").write_text('[project]\nname = "demo"\n[project.scripts]\nserve = "demo:a"\n')
-    cfg = ScriptConfig(name="app", project=project, args=("--port", "1"))
-    store = LogStore(tmp_path / "db")
-    try:
-        from corral.supervisor import Script
-
-        assert Script(cfg, store, "uv")._command() == [
-            "uv", "run", "--quiet", "--project", str(project), "serve", "--port", "1",
-        ]
-    finally:
-        store.close()

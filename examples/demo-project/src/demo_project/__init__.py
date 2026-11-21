@@ -17,5 +17,5 @@ def greet() -> int:
 
 
 def housekeeping() -> None:
-    """Not declared in [project.scripts]; reachable as "demo_project:housekeeping"."""
+    """Not declared in [project.scripts]; the example Procfile calls it with python -c."""
     print("nothing to clean up")

@@ -37,7 +37,7 @@ MAX_SERIES = 2000  # per script, so a runaway label cannot eat the runner's memo
 
 _NAME_RE = re.compile(r"^[a-zA-Z_:][a-zA-Z0-9_:]*$")
 _LABEL_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
-_RESERVED_LABELS = ("script", "le", "quantile")
+_RESERVED_LABELS = ("script", "app", "le", "quantile")
 _OPS = {"inc": ("counter", "gauge"), "set": ("gauge",), "observe": ("histogram", "summary")}
 _GUESS = {"inc": "counter", "set": "gauge", "observe": "histogram"}
 

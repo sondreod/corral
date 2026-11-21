@@ -14,7 +14,7 @@ uv build --wheel --out-dir "$work/wheel" >/dev/null
 
 # The runner has no third-party dependencies, so the package is just the
 # module unpacked from the wheel plus a launcher using the system Python.
-install -d "$root/usr/lib/corral" "$root/usr/bin" "$root/etc/corral/scripts" \
+install -d "$root/usr/lib/corral" "$root/usr/bin" "$root/etc/corral" \
     "$root/usr/lib/systemd/system" "$root/usr/share/doc/corral/examples" "$root/DEBIAN"
 uv run --no-project python -m zipfile -e "$work"/wheel/*.whl "$work/unpacked"
 cp -r "$work/unpacked/corral" "$root/usr/lib/corral/"
@@ -32,7 +32,11 @@ chmod 755 "$root/usr/bin/corral"
 
 install -m 644 packaging/config.toml "$root/etc/corral/config.toml"
 install -m 644 packaging/corral.service "$root/usr/lib/systemd/system/"
-install -m 644 examples/ticker.py examples/report.py "$root/usr/share/doc/corral/examples/"
+install -m 644 examples/.env examples/ticker.py examples/report.py "$root/usr/share/doc/corral/examples/"
+# batch.py finds corral.metrics through this checkout (a path dependency),
+# which an installed copy does not have, so it stays out.
+grep -v '^batch:' examples/Procfile > "$root/usr/share/doc/corral/examples/Procfile"
+chmod 644 "$root/usr/share/doc/corral/examples/Procfile"
 demo=usr/share/doc/corral/examples/demo-project
 install -d "$root/$demo/src/demo_project"
 install -m 644 examples/demo-project/pyproject.toml "$root/$demo/"
@@ -49,12 +53,11 @@ Priority: optional
 Architecture: all
 Depends: python3 (>= 3.11), adduser
 Maintainer: $maintainer
-Description: supervisor for PEP 723 Python scripts with a web interface
- Runs Python scripts that declare their dependencies inline (PEP 723) via
- "uv run --script", either as restarted services or on a schedule, captures
- their output, and serves a web page with their status and searchable logs.
- .
- Requires the uv executable (https://docs.astral.sh/uv/) on the machine.
+Description: Procfile process supervisor with a web interface
+ Runs the processes listed in Procfiles (for example Python scripts with
+ "uv run --script"), either as restarted services or on a schedule, captures
+ their output, and serves a web page with their status, searchable logs,
+ Prometheus metrics and dashboards.
 EOF
 
 find "$root" -type d -exec chmod 755 {} +

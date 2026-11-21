@@ -65,6 +65,12 @@ class Cron:
     a day matching either one qualifies.
     """
 
+    def __eq__(self, other) -> bool:
+        return isinstance(other, Cron) and other.expression == self.expression
+
+    def __hash__(self) -> int:
+        return hash(self.expression)
+
     def __init__(self, expression: str):
         fields = expression.split()
         if len(fields) != 5:

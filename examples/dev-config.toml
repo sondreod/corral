@@ -11,27 +11,17 @@ sample_interval = "2s"   # frequent, so the charts fill quickly while trying thi
 [metrics]
 scrape_interval = "10s"  # likewise; the default is once a minute
 
-[scripts.ticker]
-path = "ticker.py"
+# The processes in examples/Procfile, shown as examples.ticker, examples.report, ...
+[apps.examples]
+dir = "."
 
-[scripts.report]
-path = "report.py"
-mode = "schedule"
+# Every Procfile process is a long-running service unless given a schedule:
+[apps.examples.processes.report]
 every = "20s"
 
-# Entry points of a project (a directory with pyproject.toml):
-[scripts.clock]
-project = "demo-project"
-entrypoint = "demo-clock"         # a name from [project.scripts]
-
-[scripts.housekeeping]
-project = "demo-project"
-entrypoint = "demo_project:housekeeping"   # module:function, no declared script needed
-mode = "schedule"
+[apps.examples.processes.housekeeping]
 every = "30s"
 
 # Reports its own metrics (see /metrics):
-[scripts.batch]
-path = "batch.py"
-mode = "schedule"
+[apps.examples.processes.batch]
 every = "15s"

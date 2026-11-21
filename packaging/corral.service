@@ -1,5 +1,5 @@
 [Unit]
-Description=corral - supervised PEP 723 scripts with a web interface
+Description=corral - supervised Procfile processes with a web interface
 After=network-online.target
 Wants=network-online.target
 
@@ -7,17 +7,20 @@ Wants=network-online.target
 User=corral
 Group=corral
 ExecStart=/usr/bin/corral --config /etc/corral/config.toml
+# Re-reads the config, Procfiles and .env files without stopping anything
+# that did not change.
+ExecReload=/bin/kill -HUP $MAINPID
 Restart=always
 RestartSec=3
 
-# /var/lib/corral (logs, home directory) and /var/cache/corral
-# (uv's cache of script environments), both owned by the service user.
+# /var/lib/corral (databases, home directory) and /var/cache/corral
+# (uv's cache, for processes run with uv), both owned by the service user.
 StateDirectory=corral
 CacheDirectory=corral
 Environment=HOME=/var/lib/corral
 Environment=UV_CACHE_DIR=/var/cache/corral/uv
 
-# corral stops its scripts itself on SIGTERM; anything still alive
+# corral stops its processes itself on SIGTERM; anything still alive
 # after the timeout is killed.
 KillMode=mixed
 TimeoutStopSec=30

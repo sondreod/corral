@@ -10,7 +10,7 @@ from corral import exposition
 from corral.tsdb import MetricDB, QueryError, Scraper, histogram_quantile, scrape_url
 from corral.web import make_server
 
-from test_supervisor import fake_uv, harness, script, wait_for  # noqa: F401  (fixtures)
+from test_supervisor import harness, script, wait_for  # noqa: F401  (fixtures)
 
 TEXT = """\
 # HELP jobs_total Jobs done.
