@@ -225,7 +225,11 @@
   .grid.editing .gtools { display: flex; }
   .grid.editing { user-select: none; }
   .grid.editing .ghead { cursor: grab; touch-action: none; }
-  .gbody { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; overflow: hidden; }
+  /* Whole-pixel line heights: the scrolling parts (legend, stats, bars,
+     table) otherwise come out fractionally taller than their box, which the
+     browser rounds into a scroll bar that comes and goes with each refresh. */
+  .gbody { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; overflow: hidden;
+           line-height: 16px; }
   .gbody .chart { flex: none; }
   .gbody .msg { color: var(--muted); font-size: 12px; margin: auto; text-align: center; padding: 8px; }
   .gbody .msg.bad { color: var(--red); font-weight: normal; }
@@ -237,9 +241,9 @@
              max-height: 36px; overflow-y: auto; flex: none; margin-top: 4px; }
   .dlegend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; }
   .stat { display: flex; flex-direction: column; justify-content: center; flex: 1; min-height: 0; }
-  .stat .big { font-size: 32px; font-weight: 600; line-height: 1.1; font-variant-numeric: tabular-nums; }
+  .stat .big { font-size: 32px; font-weight: 600; line-height: 36px; font-variant-numeric: tabular-nums; }
   .stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px 14px; overflow-y: auto; }
-  .stats .big { font-size: 20px; }
+  .stats .big { font-size: 20px; line-height: 24px; }
   .stats .label, .stat .label { color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .bars { overflow-y: auto; display: grid; grid-template-columns: minmax(40px, max-content) 1fr auto; gap: 6px 10px;
           align-items: center; font-size: 12px; }
