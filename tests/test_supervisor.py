@@ -139,35 +139,6 @@ def test_sigkill_after_stop_timeout_and_orphans_cleaned(tmp_path, harness):
     wait_for(child_gone)
 
 
-def test_schedule_every(tmp_path, harness):
-    cfg = script(tmp_path, "job", "print('ran')\n", every=0.3)
-    supervisor, store = harness(cfg)
-    job = supervisor.scripts["job"]
-    wait_for(lambda: job.status()["runs"] >= 3)
-    status = wait_for(lambda: (s := job.status())["state"] == "waiting" and s)
-    assert status["exit_code"] == 0 and status["next_run"] > time.time() - 1
-
-    job.stop()
-    wait_for(lambda: job.status()["state"] == "stopped")
-    runs = job.status()["runs"]
-    time.sleep(0.6)
-    assert job.status()["runs"] == runs
-
-    job.restart()  # "run now" works while the schedule is disabled, and leaves it disabled
-    wait_for(lambda: job.status()["runs"] == runs + 1)
-    wait_for(lambda: job.status()["state"] == "stopped")
-
-
-def test_schedule_cron_waits(tmp_path, harness):
-    from corral.schedule import Cron
-
-    cfg = script(tmp_path, "job", "print('ran')\n", cron=Cron("0 0 1 1 *"))
-    supervisor, _ = harness(cfg)
-    job = supervisor.scripts["job"]
-    status = wait_for(lambda: (s := job.status())["state"] == "waiting" and s)
-    assert status["runs"] == 0 and status["next_run"] > time.time()
-
-
 def test_disabled_script_does_not_start(tmp_path, harness):
     supervisor, _ = harness(script(tmp_path, "off", "print('x')\n", enabled=False))
     time.sleep(0.3)
@@ -206,18 +177,14 @@ def test_shell_command_environment_and_cwd(tmp_path, harness):
 def test_reload(tmp_path, harness):
     svc = script(tmp_path, "svc", "import os, time\nprint('v', os.environ.get('V'), flush=True)\ntime.sleep(60)\n")
     gone = script(tmp_path, "gone", "import time\ntime.sleep(60)\n")
-    job = script(tmp_path, "job", "print('job ran')\n", every=3600.0)
-    supervisor, store = harness(svc, gone, job)
+    supervisor, store = harness(svc, gone)
     wait_for(lambda: logged(store, "svc", "stdout") == ["v None"])
     wait_for(lambda: supervisor.scripts["gone"].status()["state"] == "running")
-    wait_for(lambda: supervisor.scripts["job"].status()["runs"] == 1)
     first_pid = supervisor.scripts["svc"].status()["pid"]
-    old_job = supervisor.scripts["job"]
 
     new = script(tmp_path, "new", "import time\nprint('new up')\ntime.sleep(60)\n")
-    job_as_service = script(tmp_path, "job", "import time\nprint('job up')\ntime.sleep(60)\n")
-    result = supervisor.reload(Config(scripts=(replace(svc, env={"V": "2"}), new, job_as_service)))
-    assert result == {"added": ["new"], "changed": ["svc", "job"], "removed": ["gone"]}
+    result = supervisor.reload(Config(scripts=(replace(svc, env={"V": "2"}), new)))
+    assert result == {"added": ["new"], "changed": ["svc"], "removed": ["gone"]}
 
     assert "gone" not in supervisor.scripts
     wait_for(lambda: "killed by SIGTERM" in logged(store, "gone", "runner"))
@@ -225,10 +192,6 @@ def test_reload(tmp_path, harness):
     assert supervisor.scripts["svc"].status()["pid"] != first_pid
     assert "configuration changed, restarting" in logged(store, "svc", "runner")
     wait_for(lambda: "new up" in logged(store, "new"))
-    # the mode changed, so "job" is a new Script that kept the old one's totals
-    assert supervisor.scripts["job"] is not old_job
-    wait_for(lambda: "job up" in logged(store, "job"))
-    assert supervisor.scripts["job"].counters()["runs"] == 2
 
     unchanged = supervisor.scripts["svc"]
     assert supervisor.reload(supervisor.config) == {"added": [], "changed": [], "removed": []}

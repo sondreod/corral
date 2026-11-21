@@ -1,6 +1,6 @@
 import pytest
 
-from corral.config import ConfigError, load_config
+from corral.config import ConfigError, load_config, parse_duration
 
 
 def write(tmp_path, text):
@@ -45,7 +45,7 @@ def test_full_config(tmp_path):
             dir = "other"
             procfile = "Procs"
             [apps.other.processes.nightly]
-            cron = "0 3 * * *"
+            stop_timeout = 5
             """,
         )
     )
@@ -60,19 +60,26 @@ def test_full_config(tmp_path):
     assert (web.name, web.app, web.process, web.command) == ("shop.web", "shop", "web", "uv run app.py")
     assert web.cwd == tmp_path / "shop" and web.path == cfg.path
     assert web.env == {"SHARED": "from-dotenv", "PORT": "2", "APP": "shop"}  # app env wins over .env
-    assert (web.mode, web.enabled, web.restart_delay, web.stop_timeout) == ("service", True, 1.0, 10.0)
+    assert (web.enabled, web.restart_delay, web.stop_timeout) == (True, 1.0, 10.0)
     assert worker.command == "./work.sh --fast"
     assert worker.env["PORT"] == "3" and not worker.enabled and worker.stop_timeout == 30
     assert worker.restart_delay == 1.0  # from the app
-    assert nightly.name == "other.nightly" and nightly.mode == "schedule"
-    assert nightly.cron.expression == "0 3 * * *" and nightly.cwd == tmp_path / "other"
+    assert nightly.name == "other.nightly" and nightly.stop_timeout == 5
+    assert nightly.cwd == tmp_path / "other"
 
 
-def test_schedule_every(tmp_path):
-    app_dir(tmp_path, procfile="report: ./report\n")
-    cfg = load_config(write(tmp_path, '[apps.shop]\ndir = "shop"\n[apps.shop.processes.report]\nevery = "5m"\n'))
-    (report,) = cfg.scripts
-    assert report.every == 300 and report.schedule_text == "every 300s"
+@pytest.mark.parametrize(
+    "value, seconds",
+    [(30, 30), (1.5, 1.5), ("45", 45), ("30s", 30), ("5m", 300), ("1h", 3600), ("2d", 172800)],
+)
+def test_parse_duration(value, seconds):
+    assert parse_duration(value) == seconds
+
+
+@pytest.mark.parametrize("value", ["", "abc", "5w", 0, -1, True, None])
+def test_parse_duration_rejects(value):
+    with pytest.raises(ValueError):
+        parse_duration(value)
 
 
 def test_empty_config(tmp_path):
@@ -100,9 +107,9 @@ def test_procfile_problems(tmp_path):
         ("[apps.shop]\n", "'dir' .* is required"),
         ('[apps.shop]\ndir = "shop"\ntypo = 1', r"unknown key\(s\) in \[apps.shop\]: typo"),
         ('[apps.shop]\ndir = "shop"\n[apps.shop.processes.web]\ntypo = 1', r"\[processes.web\]: unknown key"),
-        ('[apps.shop]\ndir = "shop"\n[apps.shop.processes.web]\nevery = "1m"\ncron = "* * * * *"', "not both"),
-        ('[apps.shop]\ndir = "shop"\n[apps.shop.processes.web]\ncron = "nope"', "5 fields"),
-        ('[apps.shop]\ndir = "shop"\n[apps.shop.processes.web]\nevery = inf', "finite"),
+        ('[apps.shop]\ndir = "shop"\n[apps.shop.processes.web]\nevery = "1m"', "'every' and 'cron' are no longer supported"),
+        ('[apps.shop]\ndir = "shop"\n[apps.shop.processes.web]\ncron = "* * * * *"', "no longer supported"),
+        ('[apps.shop]\ndir = "shop"\nevery = "1m"', r"\[apps.shop\]: 'every' and 'cron' are no longer"),
         ('[apps.shop]\ndir = "shop"\nprocesses = 3', "'processes' must be a table"),
         ('[apps.shop]\ndir = "shop"\nenv = { A = 1 }', "'env' values must be strings"),
         ('[apps."a.b"]\ndir = "shop"', "name may only contain"),

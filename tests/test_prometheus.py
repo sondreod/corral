@@ -38,14 +38,14 @@ def test_label_escaping():
 
 def test_metrics_endpoint(tmp_path, harness):  # noqa: F811
     svc = script(tmp_path, "svc", "import sys, time\nprint('a')\nprint('b')\nprint('c', file=sys.stderr)\ntime.sleep(60)\n")
-    bad = script(tmp_path, "bad", "raise SystemExit(3)\n", every=3600.0)
+    bad = script(tmp_path, "bad", "raise SystemExit(3)\n", restart_delay=3600.0)
     supervisor, store = harness(svc, bad)
     monitor = Monitor(supervisor, store, interval=3600, retention_days=7)  # sampled by hand
     server = make_server("127.0.0.1", 0, supervisor, store, monitor)
     threading.Thread(target=server.serve_forever, daemon=True).start()
 
     wait_for(lambda: supervisor.scripts["svc"].counters()["lines"] == {"stdout": 2, "stderr": 1})
-    wait_for(lambda: supervisor.scripts["bad"].status()["state"] == "waiting")
+    wait_for(lambda: supervisor.scripts["bad"].status()["state"] == "backoff")
     monitor.sample()
 
     with urllib.request.urlopen(f"http://127.0.0.1:{server.server_address[1]}/metrics", timeout=5) as response:
@@ -66,7 +66,7 @@ def test_metrics_endpoint(tmp_path, harness):  # noqa: F811
     assert value(m, "script_threads", script="svc") >= 1 and value(m, "script_open_fds", script="svc") >= 3
     assert value(m, "script_cpu_seconds_total", script="svc") >= 0
 
-    assert value(m, "script_state", script="bad", state="waiting") == 1
+    assert value(m, "script_state", script="bad", state="backoff") == 1
     assert value(m, "script_run_failures_total", script="bad") == 1
     assert value(m, "script_last_exit_code", script="bad") == 3
     assert value(m, "script_next_run_time_seconds", script="bad") > value(m, "script_last_exit_time_seconds", script="bad")

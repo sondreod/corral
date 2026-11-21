@@ -41,7 +41,7 @@ retention = "30d"
 #
 #     web: uv run --script app.py --port 8000
 #     worker: uv run --project . myapp-worker
-#     report: ./report.sh
+#     mailer: ./mailer.sh
 #
 # Each line runs with /bin/sh in that folder, as the corral user, and shows
 # up as "<app>.<process>" (e.g. shop.web). KEY=value lines in the folder's
@@ -59,13 +59,9 @@ retention = "30d"
 # stop_timeout = 10            # seconds between SIGTERM and SIGKILL
 # enabled = true               # false: only started from the web interface
 #
-# Every process is a long-running service, restarted whenever it exits,
-# unless it gets a schedule here. Processes accept the same settings as the
-# app, which they override:
+# Every process is a long-running service, restarted whenever it exits.
+# Processes accept the same settings as the app, which they override:
 #
-# [apps.shop.processes.report]
-# every = "15m"                # or: cron = "30 6 * * 1-5"  (local time)
-#                              # a scheduled run never overlaps the previous one
 # [apps.shop.processes.worker]
 # env = { QUEUE = "default" }
 # stop_timeout = 60

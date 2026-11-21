@@ -1,9 +1,8 @@
 # Example app for corral: one process per line, "name: command".
-# Commands run with /bin/sh in this folder; scheduling is set in corral's
-# config (see dev-config.toml).
+# Commands run with /bin/sh in this folder; each runs as a service and is
+# restarted when it exits.
 ticker: uv run --quiet --script ticker.py
 report: uv run --quiet --script report.py
 batch: uv run --quiet --script batch.py
-# Entry points of a project (a directory with pyproject.toml):
+# An entry point of a project (a directory with pyproject.toml):
 clock: uv run --quiet --project demo-project demo-clock
-housekeeping: uv run --quiet --project demo-project python -c 'import demo_project; demo_project.housekeeping()'

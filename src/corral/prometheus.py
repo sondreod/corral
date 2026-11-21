@@ -18,7 +18,7 @@ from .monitor import Monitor
 from .supervisor import Supervisor
 
 CONTENT_TYPE = "text/plain; version=0.0.4; charset=utf-8"
-STATES = ("stopped", "starting", "running", "stopping", "backoff", "waiting")
+STATES = ("stopped", "starting", "running", "stopping", "backoff")
 
 
 def _labels(labels: dict[str, str]) -> str:
@@ -84,7 +84,7 @@ def render(supervisor: Supervisor, monitor: Monitor | None = None) -> str:
     )
     started = family("script_last_start_time_seconds", "gauge", "When the last run started, as a Unix time.")
     exited = family("script_last_exit_time_seconds", "gauge", "When the last run ended, as a Unix time.")
-    next_run = family("script_next_run_time_seconds", "gauge", "When the next run is due, as a Unix time.")
+    next_run = family("script_next_run_time_seconds", "gauge", "When a process in backoff restarts, as a Unix time.")
     cpu = family(
         "script_cpu_seconds_total", "counter", "CPU time used by the script's process tree, user and system."
     )

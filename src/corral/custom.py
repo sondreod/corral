@@ -20,7 +20,7 @@ counter for ``inc``, a gauge for ``set``, a histogram for ``observe``; a
 ``type`` given on that line overrides the guess.
 
 The values live in the runner, not in the script, so they survive the script
-exiting: a counter keeps counting across the runs of a scheduled script.
+exiting: a counter keeps counting across restarts.
 """
 
 from __future__ import annotations

@@ -19,7 +19,7 @@ option. Each app is a folder with a `Procfile`:
 # /srv/shop/Procfile
 web: uv run --script app.py --port 8000
 worker: uv run --project . shop-worker
-report: ./report.sh --daily
+mailer: ./mailer.sh
 ```
 
 ```toml
@@ -31,12 +31,12 @@ port = 8723
 dir = "/srv/shop"              # the folder with the Procfile
 env = { LOG_LEVEL = "info" }   # optional, for every process
 
-[apps.shop.processes.report]   # optional settings for one process
-cron = "30 6 * * 1-5"          # or: every = "15m"
+[apps.shop.processes.worker]   # optional settings for one process
+stop_timeout = 60
 ```
 
 The processes are named `<app>.<process>`: `shop.web`, `shop.worker`,
-`shop.report`.
+`shop.mailer`.
 
 - Each command runs with `/bin/sh -c` in the app's folder, so pipes,
   `&&` and `$VARIABLES` work. Blank lines and `#` comments are skipped.
@@ -54,25 +54,22 @@ The processes are named `<app>.<process>`: `shop.web`, `shop.worker`,
 
 `systemctl reload corral` (SIGHUP) or the **Reload** button in the web
 interface re-reads the config file, the Procfiles and the `.env` files:
-new processes start, removed ones stop, and a running service whose command
-or environment changed is restarted. Scheduled processes pick up changes at
-their next run; everything else keeps running. If anything is wrong (a
+new processes start, removed ones stop, and a running process whose command
+or environment changed is restarted; everything else keeps running. If anything is wrong (a
 Procfile line it cannot read, say) the reload is refused with the reason and
 nothing changes. `[server]`, `[runner]` and `[metrics]` settings only apply
 after a restart, which the reload reports.
 
 ### Behaviour
 
-- Processes are long-running **services** unless they have `every` or
-  `cron`. A service is restarted after `restart_delay` seconds. Each exit
-  within 10 seconds of starting doubles the delay, up to `max_restart_delay`.
-- **Scheduled** processes never overlap themselves. With `every`, the first
-  run happens at startup and later runs are timed from the start of the
-  previous one. `cron` takes the usual five fields, in local time.
+- Every process is a long-running service, restarted `restart_delay`
+  seconds after it exits. Each exit within 10 seconds of starting doubles
+  the delay, up to `max_restart_delay`. corral does not schedule jobs: run
+  those from cron or a systemd timer.
 - Stopping a process sends SIGTERM to its whole process group (the shell
   and everything it started), then SIGKILL after `stop_timeout` seconds.
   When the shell exits, whatever it left running gets the same treatment.
-- Stop/start/disable from the web page lasts until corral restarts; the
+- Stop/start from the web page lasts until corral restarts; the
   `enabled` option decides the state at startup (and when it changes in a
   reload).
 
@@ -122,7 +119,7 @@ label and metric names date from when corral ran scripts) and its app
 
 | Metric | Type | Meaning |
 | --- | --- | --- |
-| `corral_script_state{state=…}` | gauge | 1 for the current state (`stopped`, `starting`, `running`, `stopping`, `backoff`, `waiting`), 0 for the others |
+| `corral_script_state{state=…}` | gauge | 1 for the current state (`stopped`, `starting`, `running`, `stopping`, `backoff`), 0 for the others |
 | `corral_script_up` | gauge | 1 while the process is running |
 | `corral_script_enabled` | gauge | 0 after Stop/Disable |
 | `corral_script_runs_total` | counter | starts |
@@ -205,7 +202,7 @@ There are `Counter` (`inc`, `count_exceptions`), `Gauge` (`set`, `inc`,
 `time`), each with `.labels(...)`. What differs from `prometheus_client`:
 
 - **The runner holds the values, not the script.** A counter keeps counting
-  across runs of a scheduled script, and a gauge keeps its last value after
+  across restarts of a script, and a gauge keeps its last value after
   the script exits. Everything starts again when the runner restarts.
 - A counter is exposed with `_total` added to its name if it is missing.
 - A `Summary` has `_count` and `_sum` only, no quantiles.

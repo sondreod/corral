@@ -13,10 +13,26 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .procfile import ProcfileError, read_env, read_procfile
-from .schedule import Cron, parse_duration
 
 # No dots: a process is named "<app>.<process>".
 APP_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
+_UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+_DURATION_RE = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*([smhd]?)\s*$")
+
+
+def parse_duration(value) -> float:
+    """Seconds from a number or a string such as ``"30s"``, ``"5m"``, ``"1h"``."""
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        seconds = float(value)
+    elif isinstance(value, str) and (m := _DURATION_RE.match(value)):
+        seconds = float(m.group(1)) * _UNITS[m.group(2) or "s"]
+    else:
+        raise ValueError(f"invalid duration {value!r} (use e.g. 30, \"30s\", \"5m\", \"1h\")")
+    if not math.isfinite(seconds):
+        raise ValueError("duration must be a finite number")
+    if seconds <= 0:
+        raise ValueError("duration must be positive")
+    return seconds
 
 
 class ConfigError(ValueError):
@@ -37,25 +53,9 @@ class ScriptConfig:
     # Directories put in front of PATH ([runner] path).
     path: tuple[str, ...] = ()
     enabled: bool = True
-    # services
     restart_delay: float = 2.0
     max_restart_delay: float = 60.0
-    # scheduled: at most one of these is set; neither means a service
-    every: float | None = None
-    cron: Cron | None = None
     stop_timeout: float = 10.0
-
-    @property
-    def mode(self) -> str:
-        return "schedule" if self.every is not None or self.cron is not None else "service"
-
-    @property
-    def schedule_text(self) -> str | None:
-        if self.cron is not None:
-            return f"cron {self.cron.expression}"
-        if self.every is not None:
-            return f"every {self.every:g}s"
-        return None
 
 
 @dataclass(frozen=True)
@@ -135,19 +135,12 @@ def _process_settings(table: dict, defaults: dict) -> dict:
     return out
 
 
-def _schedule(table: dict) -> dict:
-    every_raw = table.pop("every", None)
-    cron_raw = _take(table, "cron", str, None)
-    if every_raw is not None and cron_raw is not None:
-        raise ConfigError("give either 'every' or 'cron', not both")
-    try:
-        if every_raw is not None:
-            return {"every": parse_duration(every_raw)}
-        if cron_raw is not None:
-            return {"cron": Cron(cron_raw)}
-    except ValueError as exc:
-        raise ConfigError(str(exc)) from None
-    return {}
+def _no_schedule(table: dict) -> None:
+    if "every" in table or "cron" in table:
+        raise ConfigError(
+            "'every' and 'cron' are no longer supported: every process runs as a service;"
+            " run scheduled jobs from cron or a systemd timer instead"
+        )
 
 
 def _app(name: str, table: dict, base: Path, path: tuple[str, ...]) -> tuple[AppConfig, list[ScriptConfig]]:
@@ -167,6 +160,7 @@ def _app(name: str, table: dict, base: Path, path: tuple[str, ...]) -> tuple[App
     overrides = table.pop("processes", {})
     if not isinstance(overrides, dict):
         raise ConfigError("'processes' must be a table, written [apps.<app>.processes.<process>]")
+    _no_schedule(table)
     _no_leftovers(table, f"[apps.{name}]")
 
     try:
@@ -190,14 +184,14 @@ def _app(name: str, table: dict, base: Path, path: tuple[str, ...]) -> tuple[App
         try:
             env = {**dotenv, **app_env, **_env(own)}
             settings = _process_settings(own, defaults)
-            schedule = _schedule(own)
+            _no_schedule(own)
             _no_leftovers(own, f"[apps.{name}.processes.{process}]")
         except ConfigError as exc:
             raise ConfigError(f"[processes.{process}]: {exc}") from None
         scripts.append(
             ScriptConfig(
                 name=f"{name}.{process}", command=command, cwd=app_dir, app=name, process=process,
-                env=env, path=path, **settings, **schedule,
+                env=env, path=path, **settings,
             )
         )
     return AppConfig(name, app_dir, procfile), scripts

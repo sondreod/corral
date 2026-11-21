@@ -14,14 +14,3 @@ scrape_interval = "10s"  # likewise; the default is once a minute
 # The processes in examples/Procfile, shown as examples.ticker, examples.report, ...
 [apps.examples]
 dir = "."
-
-# Every Procfile process is a long-running service unless given a schedule:
-[apps.examples.processes.report]
-every = "20s"
-
-[apps.examples.processes.housekeeping]
-every = "30s"
-
-# Reports its own metrics (see /metrics):
-[apps.examples.processes.batch]
-every = "15s"

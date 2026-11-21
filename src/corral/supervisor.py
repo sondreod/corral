@@ -1,7 +1,7 @@
 """Runs the processes of the configured apps and keeps track of their state.
 
 Each process gets one thread that alternates between waiting for its turn
-(restart backoff, schedule, or being stopped) and running its Procfile
+(restart backoff, or being stopped) and running its Procfile
 command once with ``/bin/sh -c``. (The code calls them scripts, after what
 corral first ran.)
 """
@@ -13,7 +13,6 @@ import signal
 import subprocess
 import threading
 import time
-from datetime import datetime
 
 from .config import Config, ScriptConfig
 from .custom import PREFIX as METRIC_PREFIX
@@ -64,15 +63,13 @@ class Script:
         self._thread.start()
 
     def start(self) -> None:
-        """Start a service, or resume a schedule."""
         with self._lock:
             if self._enabled:
                 return
             self._enabled = True
             self._quick_exits = 0
             self._wait_since = time.time()
-            if self.cfg.mode == "service":
-                self._run_now = True
+            self._run_now = True
         self._wake.set()
 
     def stop(self) -> None:
@@ -84,19 +81,16 @@ class Script:
         self._wake.set()
 
     def restart(self) -> None:
-        """Restart a service; for a scheduled script, run it now."""
         with self._lock:
-            if self.cfg.mode == "service":
-                self._enabled = True
+            self._enabled = True
             self._quick_exits = 0
             self._run_now = True
             self._stop_current()
         self._wake.set()
 
     def reconfigure(self, cfg: ScriptConfig) -> None:
-        """Take new settings (same name and mode) from a reloaded config.
-        A running service whose command or environment changed is restarted;
-        a scheduled one uses them from its next run."""
+        """Take new settings (same name) from a reloaded config. A running
+        process whose command or environment changed is restarted."""
         with self._lock:
             old, self.cfg = self.cfg, cfg
             if cfg.enabled != old.enabled:
@@ -106,9 +100,9 @@ class Script:
                 if not cfg.enabled:
                     self._run_now = False
                     self._stop_current()
-                elif cfg.mode == "service":
+                else:
                     self._run_now = True
-            elif self._proc is not None and cfg.mode == "service" and (
+            elif self._proc is not None and (
                 (cfg.command, cfg.cwd, cfg.env, cfg.path) != (old.command, old.cwd, old.env, old.path)
             ):
                 self._log("configuration changed, restarting")
@@ -116,15 +110,6 @@ class Script:
                 self._run_now = True
                 self._stop_current()
         self._wake.set()
-
-    def take_over(self, old: "Script") -> None:
-        """Continue the totals and reported metrics of ``old``, which this
-        replaces, so counters on /metrics do not start again from zero."""
-        with old._lock:
-            self._runs, self._failures = old._runs, old._failures
-        with old._count_lock:
-            self._line_totals = dict(old._line_totals)
-        self.metrics = old.metrics
 
     def shutdown(self) -> None:
         with self._lock:
@@ -164,8 +149,6 @@ class Script:
                 "process": cfg.process,
                 "command": cfg.command,
                 "cwd": str(cfg.cwd),
-                "mode": cfg.mode,
-                "schedule": cfg.schedule_text,
                 "state": self._state,
                 "enabled": self._enabled,
                 "pid": self._proc.pid if self._proc else None,
@@ -201,21 +184,15 @@ class Script:
         threading.Thread(target=escalate, daemon=True).start()
 
     def _due(self) -> float:
-        """Wall-clock time of the next run. Caller holds the lock."""
+        """Wall-clock time of the next start. Caller holds the lock."""
         cfg = self.cfg
-        if cfg.mode == "service":
-            if self._runs == 0 or self._quick_exits == 0:
-                delay = 0.0 if self._runs == 0 else cfg.restart_delay
-            else:
-                delay = min(cfg.restart_delay * 2 ** (self._quick_exits - 1), cfg.max_restart_delay)
-            return self._wait_since + delay
-        if cfg.cron is not None:
-            return cfg.cron.next_after(datetime.fromtimestamp(self._wait_since)).timestamp()
-        # "every": the first run is immediate, later ones are measured from
-        # the start of the previous run.
-        if self._started_at is None:
+        if self._runs == 0:
             return self._wait_since
-        return max(self._started_at + cfg.every, self._wait_since)
+        if self._quick_exits == 0:
+            delay = cfg.restart_delay
+        else:
+            delay = min(cfg.restart_delay * 2 ** (self._quick_exits - 1), cfg.max_restart_delay)
+        return self._wait_since + delay
 
     def _wait_for_turn(self) -> int | None:
         """Block until the script should run. Returns the stop generation
@@ -237,7 +214,7 @@ class Script:
                     remaining = due - time.time()
                     if remaining <= 0:
                         return self._stop_gen
-                    self._state = "backoff" if self.cfg.mode == "service" else "waiting"
+                    self._state = "backoff"
                     self._next_run = due
                     # Re-check regularly so wall-clock changes are noticed.
                     timeout = min(remaining, 30.0)
@@ -423,14 +400,7 @@ class Supervisor:
                     added.append(cfg.name)
                 elif script.cfg != cfg:
                     changed.append(cfg.name)
-                    if script.cfg.mode == cfg.mode:
-                        script.reconfigure(cfg)
-                    else:  # service <-> schedule: a fresh start is simplest
-                        script.shutdown()
-                        replacement = Script(cfg, self._store)
-                        replacement.take_over(script)
-                        replacement.begin()
-                        script = replacement
+                    script.reconfigure(cfg)
                 new[cfg.name] = script
             for name, script in old.items():
                 if name not in new:

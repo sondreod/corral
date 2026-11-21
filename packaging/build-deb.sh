@@ -55,7 +55,7 @@ Depends: python3 (>= 3.11), adduser
 Maintainer: $maintainer
 Description: Procfile process supervisor with a web interface
  Runs the processes listed in Procfiles (for example Python scripts with
- "uv run --script"), either as restarted services or on a schedule, captures
+ "uv run --script") as services, restarting them when they exit, captures
  their output, and serves a web page with their status, searchable logs,
  Prometheus metrics and dashboards.
 EOF

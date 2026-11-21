@@ -111,7 +111,6 @@
   .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--grey); flex: none; }
   .state { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .03em; color: var(--grey); }
   .s-running .dot { background: var(--green); } .s-running .state { color: var(--green); }
-  .s-waiting .dot { background: var(--blue); } .s-waiting .state { color: var(--blue); }
   .s-backoff .dot, .s-starting .dot, .s-stopping .dot { background: var(--amber); }
   .s-backoff .state, .s-starting .state, .s-stopping .state { color: var(--amber); }
   .detail { color: var(--muted); font-size: 12px; }
@@ -496,10 +495,10 @@ const rangeLabel = (seconds) => (RANGES.find((r) => r[1] === seconds) || ["range
 // ---- script status -----------------------------------------------------
 
 function describe(s, now) {
-  const parts = [s.mode === "schedule" ? s.schedule : "service"];
+  const parts = [];
   if (s.pid) parts.push("pid " + s.pid);
   if (s.pid && s.started_at) parts.push("up " + ago(now - s.started_at));
-  if (s.next_run) parts.push((s.state === "backoff" ? "restart in " : "next in ") + ago(s.next_run - now));
+  if (s.next_run) parts.push("restart in " + ago(s.next_run - now));
   let bad = null;
   if (!s.pid && s.exited_at) {
     const when = " " + ago(now - s.exited_at) + " ago";
@@ -513,15 +512,14 @@ function describe(s, now) {
 function fillDetail(node, s, now) {
   const [text, bad] = describe(s, now);
   node.replaceChildren(text);
-  if (bad) node.append(" · ", el("span", "bad", bad));
+  if (bad) node.append(text ? " · " : "", el("span", "bad", bad));
 }
 
 function fillActions(node, s) {
-  const key = s.mode + s.enabled;
+  const key = String(s.enabled);
   if (node.dataset.key === key) return;   // keep buttons stable under the pointer
   node.dataset.key = key;
   node.replaceChildren();
-  const scheduled = s.mode === "schedule";
   const button = (label, action) => {
     const b = el("button", "", label);
     b.onclick = async (ev) => {
@@ -533,9 +531,9 @@ function fillActions(node, s) {
     };
     node.append(b);
   };
-  if (s.enabled) button(scheduled ? "Disable" : "Stop", "stop");
-  else button(scheduled ? "Enable" : "Start", "start");
-  button(scheduled ? "Run now" : "Restart", "restart");
+  if (s.enabled) button("Stop", "stop");
+  else button("Start", "start");
+  button("Restart", "restart");
 }
 
 function tile(label) {

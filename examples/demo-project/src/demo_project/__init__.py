@@ -15,7 +15,3 @@ def greet() -> int:
     print("hello, " + " and ".join(names))
     return 0
 
-
-def housekeeping() -> None:
-    """Not declared in [project.scripts]; the example Procfile calls it with python -c."""
-    print("nothing to clean up")
