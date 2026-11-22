@@ -6,7 +6,7 @@ from corral import prometheus
 from corral.monitor import Monitor
 from corral.web import make_server
 
-from test_supervisor import harness, script, wait_for  # noqa: F401  (fixtures)
+from test_supervisor import harness, process, wait_for  # noqa: F401  (fixtures)
 
 SAMPLE = re.compile(r'^([a-z_]+)(?:\{(.*)\})? (-?[0-9.e+-]+)$')
 
@@ -33,19 +33,19 @@ def value(samples, metric, **labels):
 
 
 def test_label_escaping():
-    assert prometheus._labels({"script": 'a"b\\c\nd'}) == '{script="a\\"b\\\\c\\nd"}'
+    assert prometheus._labels({"process": 'a"b\\c\nd'}) == '{process="a\\"b\\\\c\\nd"}'
 
 
 def test_metrics_endpoint(tmp_path, harness):  # noqa: F811
-    svc = script(tmp_path, "svc", "import sys, time\nprint('a')\nprint('b')\nprint('c', file=sys.stderr)\ntime.sleep(60)\n")
-    bad = script(tmp_path, "bad", "raise SystemExit(3)\n", restart_delay=3600.0)
+    svc = process(tmp_path, "svc", "import sys, time\nprint('a')\nprint('b')\nprint('c', file=sys.stderr)\ntime.sleep(60)\n")
+    bad = process(tmp_path, "bad", "raise SystemExit(3)\n", restart_delay=3600.0)
     supervisor, store = harness(svc, bad)
     monitor = Monitor(supervisor, store, interval=3600, retention_days=7)  # sampled by hand
     server = make_server("127.0.0.1", 0, supervisor, store, monitor)
     threading.Thread(target=server.serve_forever, daemon=True).start()
 
-    wait_for(lambda: supervisor.scripts["svc"].counters()["lines"] == {"stdout": 2, "stderr": 1})
-    wait_for(lambda: supervisor.scripts["bad"].status()["state"] == "backoff")
+    wait_for(lambda: supervisor.processes["svc"].counters()["lines"] == {"stdout": 2, "stderr": 1})
+    wait_for(lambda: supervisor.processes["bad"].status()["state"] == "backoff")
     monitor.sample()
 
     with urllib.request.urlopen(f"http://127.0.0.1:{server.server_address[1]}/metrics", timeout=5) as response:
@@ -53,34 +53,34 @@ def test_metrics_endpoint(tmp_path, harness):  # noqa: F811
         m = parse(response.read().decode())
     server.shutdown()
 
-    assert value(m, "script_state", script="svc", state="running") == 1
-    assert value(m, "script_state", script="svc", state="stopped") == 0
-    assert value(m, "script_up", script="svc") == 1 and value(m, "script_up", script="bad") == 0
-    assert value(m, "script_enabled", script="svc") == 1
-    assert value(m, "script_runs_total", script="svc") == 1
-    assert value(m, "script_run_failures_total", script="svc") == 0
-    assert value(m, "script_log_lines_total", script="svc", stream="stdout") == 2
-    assert value(m, "script_log_lines_total", script="svc", stream="stderr") == 1
-    assert value(m, "script_last_exit_code", script="svc") is None  # has not exited yet
-    assert value(m, "script_resident_memory_bytes", script="svc") > 1_000_000
-    assert value(m, "script_threads", script="svc") >= 1 and value(m, "script_open_fds", script="svc") >= 3
-    assert value(m, "script_cpu_seconds_total", script="svc") >= 0
+    assert value(m, "process_state", process="svc", state="running") == 1
+    assert value(m, "process_state", process="svc", state="stopped") == 0
+    assert value(m, "process_up", process="svc") == 1 and value(m, "process_up", process="bad") == 0
+    assert value(m, "process_enabled", process="svc") == 1
+    assert value(m, "process_runs_total", process="svc") == 1
+    assert value(m, "process_run_failures_total", process="svc") == 0
+    assert value(m, "process_log_lines_total", process="svc", stream="stdout") == 2
+    assert value(m, "process_log_lines_total", process="svc", stream="stderr") == 1
+    assert value(m, "process_last_exit_code", process="svc") is None  # has not exited yet
+    assert value(m, "process_resident_memory_bytes", process="svc") > 1_000_000
+    assert value(m, "process_threads", process="svc") >= 1 and value(m, "process_open_fds", process="svc") >= 3
+    assert value(m, "process_cpu_seconds_total", process="svc") >= 0
 
-    assert value(m, "script_state", script="bad", state="backoff") == 1
-    assert value(m, "script_run_failures_total", script="bad") == 1
-    assert value(m, "script_last_exit_code", script="bad") == 3
-    assert value(m, "script_next_run_time_seconds", script="bad") > value(m, "script_last_exit_time_seconds", script="bad")
-    assert value(m, "script_resident_memory_bytes", script="bad") is None  # not running
-    assert value(m, "script_cpu_seconds_total", script="bad") == 0
+    assert value(m, "process_state", process="bad", state="backoff") == 1
+    assert value(m, "process_run_failures_total", process="bad") == 1
+    assert value(m, "process_last_exit_code", process="bad") == 3
+    assert value(m, "process_next_run_time_seconds", process="bad") > value(m, "process_last_exit_time_seconds", process="bad")
+    assert value(m, "process_resident_memory_bytes", process="bad") is None  # not running
+    assert value(m, "process_cpu_seconds_total", process="bad") == 0
 
 
 def test_requested_stop_is_not_a_failure(tmp_path, harness):  # noqa: F811
-    supervisor, _ = harness(script(tmp_path, "svc", "import time\ntime.sleep(60)\n"))
-    svc = supervisor.scripts["svc"]
+    supervisor, _ = harness(process(tmp_path, "svc", "import time\ntime.sleep(60)\n"))
+    svc = supervisor.processes["svc"]
     wait_for(lambda: svc.status()["state"] == "running")
     svc.stop()
     wait_for(lambda: svc.status()["state"] == "stopped")
     m = parse(prometheus.render(supervisor))
-    assert value(m, "script_run_failures_total", script="svc") == 0
-    assert value(m, "script_enabled", script="svc") == 0
-    assert value(m, "script_cpu_seconds_total", script="svc") is None  # no monitor
+    assert value(m, "process_run_failures_total", process="svc") == 0
+    assert value(m, "process_enabled", process="svc") == 0
+    assert value(m, "process_cpu_seconds_total", process="svc") is None  # no monitor

@@ -1,9 +1,8 @@
 """Runs the processes of the configured apps and keeps track of their state.
 
 Each process gets one thread that alternates between waiting for its turn
-(restart backoff, or being stopped) and running its Procfile
-command once with ``/bin/sh -c``. (The code calls them scripts, after what
-corral first ran.)
+(restart backoff, or being stopped) and running its Procfile command once
+with ``/bin/sh -c``.
 """
 
 from __future__ import annotations
@@ -14,9 +13,9 @@ import subprocess
 import threading
 import time
 
-from .config import Config, ScriptConfig
+from .config import Config, ProcessConfig
 from .custom import PREFIX as METRIC_PREFIX
-from .custom import MetricError, ScriptMetrics
+from .custom import MetricError, ProcessMetrics
 from .store import LogStore
 
 # A service that exits sooner than this counts as a failed start, and the
@@ -26,8 +25,8 @@ _MAX_LINE_BYTES = 64 * 1024
 _MAX_METRIC_COMPLAINTS = 10  # per run
 
 
-class Script:
-    def __init__(self, cfg: ScriptConfig, store: LogStore):
+class Process:
+    def __init__(self, cfg: ProcessConfig, store: LogStore):
         self.cfg = cfg
         self._store = store
 
@@ -52,10 +51,10 @@ class Script:
         self._line_totals = {"stdout": 0, "stderr": 0}
         self._failures = 0
         self._count_lock = threading.Lock()
-        self.metrics = ScriptMetrics()  # what the script reports with "@metric" lines
+        self.metrics = ProcessMetrics()  # what the process reports with "@metric" lines
         self._metric_complaints = 0
 
-        self._thread = threading.Thread(target=self._loop, name=f"script-{cfg.name}", daemon=True)
+        self._thread = threading.Thread(target=self._loop, name=f"process-{cfg.name}", daemon=True)
 
     # -- control (called from other threads) -----------------------------
 
@@ -88,7 +87,7 @@ class Script:
             self._stop_current()
         self._wake.set()
 
-    def reconfigure(self, cfg: ScriptConfig) -> None:
+    def reconfigure(self, cfg: ProcessConfig) -> None:
         """Take new settings (same name) from a reloaded config. A running
         process whose command or environment changed is restarted."""
         with self._lock:
@@ -195,7 +194,7 @@ class Script:
         return self._wait_since + delay
 
     def _wait_for_turn(self) -> int | None:
-        """Block until the script should run. Returns the stop generation
+        """Block until the process should run. Returns the stop generation
         seen at that moment, or None on shutdown."""
         while True:
             with self._lock:
@@ -341,7 +340,7 @@ class Script:
                     self._log(f"internal error handling a {stream} line: {exc!r}")
 
     def _ingest(self, stream: str, line: str) -> None:
-        """Every line a script prints passes through here. Metric lines are
+        """Every line a process prints passes through here. Metric lines are
         applied and not kept as log lines."""
         if line.startswith(METRIC_PREFIX):
             try:
@@ -383,46 +382,46 @@ class Supervisor:
         self._reload_lock = threading.Lock()
         self.config = config
         # Replaced as a whole on reload, so readers can iterate it without a lock.
-        self.scripts = {s.name: Script(s, store) for s in config.scripts}
+        self.processes = {s.name: Process(s, store) for s in config.processes}
 
     def reload(self, config: Config) -> dict:
         """Apply a re-read config: start new processes, stop removed ones,
         and update or restart changed ones. Returns what changed."""
         with self._reload_lock:
-            old = self.scripts
-            new: dict[str, Script] = {}
+            old = self.processes
+            new: dict[str, Process] = {}
             added, changed, removed = [], [], []
-            for cfg in config.scripts:
-                script = old.get(cfg.name)
-                if script is None:
-                    script = Script(cfg, self._store)
-                    script.begin()
+            for cfg in config.processes:
+                process = old.get(cfg.name)
+                if process is None:
+                    process = Process(cfg, self._store)
+                    process.begin()
                     added.append(cfg.name)
-                elif script.cfg != cfg:
+                elif process.cfg != cfg:
                     changed.append(cfg.name)
-                    script.reconfigure(cfg)
-                new[cfg.name] = script
-            for name, script in old.items():
+                    process.reconfigure(cfg)
+                new[cfg.name] = process
+            for name, process in old.items():
                 if name not in new:
-                    script.shutdown()
+                    process.shutdown()
                     removed.append(name)
-            self.scripts = new
+            self.processes = new
             self.config = config
             return {"added": added, "changed": changed, "removed": removed}
 
     def start(self) -> None:
-        for script in self.scripts.values():
-            script.begin()
+        for process in self.processes.values():
+            process.begin()
 
     def status(self) -> list[dict]:
-        return [s.status() for s in self.scripts.values()]
+        return [s.status() for s in self.processes.values()]
 
     def shutdown(self) -> None:
         with self._reload_lock:
-            for script in self.scripts.values():
-                script.shutdown()
+            for process in self.processes.values():
+                process.shutdown()
         deadline = time.monotonic() + max(
-            (s.cfg.stop_timeout for s in self.scripts.values()), default=0
+            (s.cfg.stop_timeout for s in self.processes.values()), default=0
         ) + 5
-        for script in self.scripts.values():
-            script.join(max(0.0, deadline - time.monotonic()))
+        for process in self.processes.values():
+            process.join(max(0.0, deadline - time.monotonic()))

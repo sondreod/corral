@@ -39,7 +39,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"corral: {exc}", file=sys.stderr)
         return 2
     if args.check:
-        print(f"{args.config}: OK, {len(config.apps)} app(s), {len(config.scripts)} process(es)")
+        print(f"{args.config}: OK, {len(config.apps)} app(s), {len(config.processes)} process(es)")
         return 0
 
     try:
@@ -94,7 +94,7 @@ def main(argv: list[str] | None = None) -> int:
     scraper.start()
     host = f"[{config.host}]" if ":" in config.host else config.host
     print(
-        f"corral {__version__}: {len(config.apps)} app(s), {len(config.scripts)} process(es), "
+        f"corral {__version__}: {len(config.apps)} app(s), {len(config.processes)} process(es), "
         f"web interface on http://{host}:{server.server_address[1]}/",
         flush=True,
     )

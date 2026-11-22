@@ -40,7 +40,7 @@ class ConfigError(ValueError):
 
 
 @dataclass(frozen=True)
-class ScriptConfig:
+class ProcessConfig:
     """One process of an app: a line of its Procfile plus the settings for it."""
 
     name: str  # "<app>.<process>"
@@ -80,7 +80,7 @@ class Config:
     scrape_interval: float = 60.0
     metrics_retention: float = 30 * 86400.0
     apps: tuple[AppConfig, ...] = ()
-    scripts: tuple[ScriptConfig, ...] = ()  # every process of every app
+    processes: tuple[ProcessConfig, ...] = ()  # every process of every app
 
 
 def _take(table: dict, key: str, kind, default):
@@ -143,7 +143,7 @@ def _no_schedule(table: dict) -> None:
         )
 
 
-def _app(name: str, table: dict, base: Path, path: tuple[str, ...]) -> tuple[AppConfig, list[ScriptConfig]]:
+def _app(name: str, table: dict, base: Path, path: tuple[str, ...]) -> tuple[AppConfig, list[ProcessConfig]]:
     if not APP_RE.match(name):
         raise ConfigError("name may only contain letters, digits, '_' and '-'")
     table = dict(table)
@@ -175,7 +175,7 @@ def _app(name: str, table: dict, base: Path, path: tuple[str, ...]) -> tuple[App
             f" (it has {', '.join(commands)})"
         )
 
-    scripts = []
+    processes = []
     for process, command in commands.items():
         own = overrides.get(process, {})
         if not isinstance(own, dict):
@@ -188,13 +188,13 @@ def _app(name: str, table: dict, base: Path, path: tuple[str, ...]) -> tuple[App
             _no_leftovers(own, f"[apps.{name}.processes.{process}]")
         except ConfigError as exc:
             raise ConfigError(f"[processes.{process}]: {exc}") from None
-        scripts.append(
-            ScriptConfig(
+        processes.append(
+            ProcessConfig(
                 name=f"{name}.{process}", command=command, cwd=app_dir, app=name, process=process,
                 env=env, path=path, **settings,
             )
         )
-    return AppConfig(name, app_dir, procfile), scripts
+    return AppConfig(name, app_dir, procfile), processes
 
 
 def load_config(path: str | Path) -> Config:
@@ -273,16 +273,16 @@ def load_config(path: str | Path) -> Config:
     except ConfigError as exc:
         raise ConfigError(f"{path}: {exc}") from None
 
-    apps, scripts = [], []
+    apps, processes = [], []
     for name, table in apps_raw.items():
         try:
             if not isinstance(table, dict):
                 raise ConfigError("must be a table")
-            app, processes = _app(name, table, base, path_dirs)
+            app, app_processes = _app(name, table, base, path_dirs)
         except ConfigError as exc:
             raise ConfigError(f"{path}: [apps.{name}]: {exc}") from None
         apps.append(app)
-        scripts.extend(processes)
+        processes.extend(app_processes)
 
     return Config(
         host=host,
@@ -296,5 +296,5 @@ def load_config(path: str | Path) -> Config:
         scrape_interval=scrape_interval,
         metrics_retention=metrics_retention,
         apps=tuple(apps),
-        scripts=tuple(scripts),
+        processes=tuple(processes),
     )

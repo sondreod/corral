@@ -9,7 +9,7 @@ from corral.monitor import Monitor, ProcInfo, parse_stat, process_tree
 from corral.store import LogStore
 from corral.supervisor import Supervisor
 
-from test_supervisor import script as make_script, wait_for
+from test_supervisor import process as make_process, wait_for
 
 needs_proc = pytest.mark.skipif(not os.path.exists("/proc/self/stat"), reason="needs Linux /proc")
 
@@ -32,7 +32,7 @@ def test_process_tree_follows_children_and_session():
         p.pid: p
         for p in [
             proc(1, 0, 1),
-            proc(10, 1, 10),  # the script (session leader)
+            proc(10, 1, 10),  # the process (session leader)
             proc(11, 10, 10),  # child
             proc(12, 11, 10),  # grandchild
             proc(13, 1, 10),  # orphan re-parented to init, same session
@@ -46,7 +46,7 @@ def test_process_tree_follows_children_and_session():
 
 
 @needs_proc
-def test_sampling_a_running_script(tmp_path):
+def test_sampling_a_running_process(tmp_path):
     body = (
         "import subprocess, sys, time\n"
         "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
@@ -55,12 +55,12 @@ def test_sampling_a_running_script(tmp_path):
         "while time.time() < end: pass\n"  # burn CPU so there is something to measure
     )
     store = LogStore(tmp_path / "db")
-    supervisor = Supervisor(Config(scripts=(make_script(tmp_path, "busy", body),)), store)
+    supervisor = Supervisor(Config(processes=(make_process(tmp_path, "busy", body),)), store)
     monitor = Monitor(supervisor, store, interval=3600, retention_days=7)  # sampled by hand below
     supervisor.start()
     try:
-        script = supervisor.scripts["busy"]
-        wait_for(lambda: script.status()["state"] == "running")
+        process = supervisor.processes["busy"]
+        wait_for(lambda: process.status()["state"] == "running")
         wait_for(lambda: (store.flush(), len(store.query("busy", streams=("stdout", "stderr"))))[1] == 3)
 
         monitor.sample()
@@ -79,8 +79,8 @@ def test_sampling_a_running_script(tmp_path):
         assert point["out_lines"] == 2 and point["err_lines"] == 1
         assert point["cpu"] == second["cpu"] and point["rss_max"] >= first["rss"]
 
-        script.stop()
-        wait_for(lambda: script.status()["state"] == "stopped")
+        process.stop()
+        wait_for(lambda: process.status()["state"] == "stopped")
         monitor.sample()
         assert monitor.latest("busy") is None
         store.flush()

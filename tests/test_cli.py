@@ -46,8 +46,8 @@ def test_run_and_reload(tmp_path):
             return None, None
 
     def names():
-        status, body = call("/api/scripts")
-        return status == 200 and sorted(s["name"] for s in body["scripts"])
+        status, body = call("/api/processes")
+        return status == 200 and sorted(s["name"] for s in body["processes"])
 
     try:
         wait_for(lambda: names() == ["shop.web"], timeout=20)
@@ -59,7 +59,7 @@ def test_run_and_reload(tmp_path):
         )
         proc.send_signal(signal.SIGHUP)
         wait_for(lambda: names() == ["shop.echo", "shop.web"])
-        wait_for(lambda: [l["line"] for l in call("/api/scripts/shop.echo/logs?streams=stdout")[1]["lines"]] == ["hi"])
+        wait_for(lambda: [l["line"] for l in call("/api/processes/shop.echo/logs?streams=stdout")[1]["lines"]] == ["hi"])
 
         # a broken Procfile is refused and nothing changes
         (shop / "Procfile").write_text("this is not a procfile\n")

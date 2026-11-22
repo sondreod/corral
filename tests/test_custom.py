@@ -4,10 +4,10 @@ import pytest
 
 from corral import metrics as client
 from corral import prometheus
-from corral.custom import MAX_SERIES, MetricError, ScriptMetrics
+from corral.custom import MAX_SERIES, MetricError, ProcessMetrics
 
 from test_prometheus import parse
-from test_supervisor import harness, logged, script, wait_for  # noqa: F401  (fixtures)
+from test_supervisor import harness, logged, process, wait_for  # noqa: F401  (fixtures)
 
 
 def send(metrics, **message):
@@ -23,7 +23,7 @@ def samples(metrics):
 
 
 def test_counter_and_gauge():
-    m = ScriptMetrics()
+    m = ProcessMetrics()
     send(m, name="jobs", op="declare", type="counter", help="Jobs done")
     send(m, name="jobs", op="inc")
     send(m, name="jobs", op="inc", value=2.5, labels={"queue": "mail"})
@@ -42,7 +42,7 @@ def test_counter_and_gauge():
 
 
 def test_histogram_and_summary():
-    m = ScriptMetrics()
+    m = ProcessMetrics()
     send(m, name="took", op="declare", type="histogram", buckets=[1, 5])
     for value in (0.5, 1, 3, 100):
         send(m, name="took", op="observe", value=value)
@@ -60,7 +60,7 @@ def test_histogram_and_summary():
 
 
 def test_redeclaring_keeps_values_unless_the_type_changes():
-    m = ScriptMetrics()
+    m = ProcessMetrics()
     send(m, name="jobs_total", op="declare", type="counter")
     send(m, name="jobs_total", op="inc", value=4)
     send(m, name="jobs_total", op="declare", type="counter", help="now with help")  # the next run
@@ -86,7 +86,7 @@ def test_redeclaring_keeps_values_unless_the_type_changes():
         ('{"name": "x", "op": "inc", "value": "1"}', "finite number"),
         ('{"name": "x", "op": "set"}', "finite number"),
         ('{"name": "x", "op": "set", "type": "counter", "value": 1}', "cannot set a counter"),
-        ('{"name": "x", "op": "inc", "labels": {"script": "a"}}', "label name"),
+        ('{"name": "x", "op": "inc", "labels": {"process": "a"}}', "label name"),
         ('{"name": "x", "op": "inc", "labels": {"a": [1]}}', "string or number"),
         ('{"name": "x", "op": "set", "value": 1' + "0" * 400 + "}", "too large"),
         ('{"name": "x", "op": "set", "value": 1e999}', "finite number"),
@@ -96,18 +96,18 @@ def test_redeclaring_keeps_values_unless_the_type_changes():
 )
 def test_invalid_lines(text, reason):
     with pytest.raises(MetricError, match=reason):
-        ScriptMetrics().handle(text)
+        ProcessMetrics().handle(text)
 
 
 def test_wrong_operation_for_declared_type():
-    m = ScriptMetrics()
+    m = ProcessMetrics()
     send(m, name="jobs", op="declare", type="counter")
     with pytest.raises(MetricError, match="cannot observe a counter"):
         send(m, name="jobs", op="observe", value=1)
 
 
 def test_series_limit():
-    m = ScriptMetrics()
+    m = ProcessMetrics()
     for n in range(MAX_SERIES):
         send(m, name="x", op="inc", labels={"n": n})
     with pytest.raises(MetricError, match="series"):
@@ -153,7 +153,7 @@ def test_client_feeds_the_runner(emitted):
         raise KeyError("boom")
 
     assert all(line.startswith("@metric {") for line in emitted)
-    m = ScriptMetrics()
+    m = ProcessMetrics()
     for line in emitted:
         m.handle(line[len("@metric "):])
     got = samples(m)
@@ -189,7 +189,7 @@ def test_client_checks_its_arguments(emitted):
     with pytest.raises(ValueError):
         client.Gauge("9lives")
     with pytest.raises(ValueError):
-        client.Gauge("ok", labelnames=["script"])
+        client.Gauge("ok", labelnames=["process"])
     with pytest.raises(ValueError):
         client.Histogram("h", buckets=(2, 1))
 
@@ -200,10 +200,10 @@ def test_client_is_silent_outside_the_runner(emitted, monkeypatch):
     assert emitted == [] and not client.enabled()
 
 
-# -- through a running script ------------------------------------------------
+# -- through a running process ------------------------------------------------
 
 
-def test_script_metrics_reach_the_metrics_page(tmp_path, harness):  # noqa: F811
+def test_process_metrics_reach_the_metrics_page(tmp_path, harness):  # noqa: F811
     body = (
         "import os, time\n"
         "from corral.metrics import Counter, Gauge\n"
@@ -218,51 +218,51 @@ def test_script_metrics_reach_the_metrics_page(tmp_path, harness):  # noqa: F811
     other = "print('@metric {\"name\": \"batch_rows\", \"op\": \"set\", \"value\": 7}', flush=True)\n"
     clash = "print('@metric {\"name\": \"batch_rows\", \"op\": \"inc\", \"type\": \"counter\"}', flush=True)\n"
     supervisor, store = harness(
-        script(tmp_path, "batch", body),
-        script(tmp_path, "other", other + "import time; time.sleep(60)\n"),
-        script(tmp_path, "clash", clash + "import time; time.sleep(60)\n"),
+        process(tmp_path, "batch", body),
+        process(tmp_path, "other", other + "import time; time.sleep(60)\n"),
+        process(tmp_path, "clash", clash + "import time; time.sleep(60)\n"),
     )
     wait_for(lambda: logged(store, "batch", "stdout") == ["a normal line"])  # metric lines are not log lines
-    wait_for(lambda: supervisor.scripts["other"].metrics.families())
-    wait_for(lambda: supervisor.scripts["clash"].metrics.families())
+    wait_for(lambda: supervisor.processes["other"].metrics.families())
+    wait_for(lambda: supervisor.processes["clash"].metrics.families())
     assert any("ignored metric line (not valid JSON)" in line for line in logged(store, "batch", "runner"))
-    assert supervisor.scripts["batch"].counters()["lines"]["stdout"] == 1
+    assert supervisor.processes["batch"].counters()["lines"]["stdout"] == 1
 
     text = prometheus.render(supervisor)
     m = parse(text)
-    assert m[("batch_runs_total", (("result", "ok"), ("script", "batch")))] == 1
-    assert m[("batch_rows", (("script", "batch"),))] == 42
-    assert m[("batch_rows", (("script", "other"),))] == 7
+    assert m[("batch_runs_total", (("process", "batch"), ("result", "ok")))] == 1
+    assert m[("batch_rows", (("process", "batch"),))] == 42
+    assert m[("batch_rows", (("process", "other"),))] == 7
     assert "# HELP batch_runs_total Batches run\n# TYPE batch_runs_total counter\n" in text
     assert text.count("# TYPE batch_rows ") == 1
     assert "left out batch_rows_total" not in text  # a counter named batch_rows is batch_rows_total: no clash
-    assert m[("batch_rows_total", (("script", "clash"),))] == 1
+    assert m[("batch_rows_total", (("process", "clash"),))] == 1
 
     # The values outlive the process, and a counter keeps counting on the next run.
-    batch = supervisor.scripts["batch"]
+    batch = supervisor.processes["batch"]
     batch.restart()
-    wait_for(lambda: parse(prometheus.render(supervisor))[("batch_runs_total", (("result", "ok"), ("script", "batch")))] == 2)
+    wait_for(lambda: parse(prometheus.render(supervisor))[("batch_runs_total", (("process", "batch"), ("result", "ok")))] == 2)
 
 
-def test_scripts_disagreeing_about_a_type():
+def test_processes_disagreeing_about_a_type():
     from types import SimpleNamespace
 
-    first, second, third = ScriptMetrics(), ScriptMetrics(), ScriptMetrics()
+    first, second, third = ProcessMetrics(), ProcessMetrics(), ProcessMetrics()
     send(first, name="rows", op="set", value=1)
     send(second, name="rows", op="observe", value=1)
     send(third, name="rows", op="set", value=3)
-    scripts = {n: SimpleNamespace(metrics=m, cfg=SimpleNamespace(app="")) for n, m in (("a", first), ("b", second), ("c", third))}
-    lines = prometheus._custom(SimpleNamespace(scripts=scripts), set())
+    processes = {n: SimpleNamespace(metrics=m, cfg=SimpleNamespace(app="")) for n, m in (("a", first), ("b", second), ("c", third))}
+    lines = prometheus._custom(SimpleNamespace(processes=processes), set())
     assert lines == [
         "# TYPE rows gauge",
-        'rows{script="a"} 1',
-        'rows{script="c"} 3',
-        "# corral: left out rows (histogram) from script b: name in use",
+        'rows{process="a"} 1',
+        'rows{process="c"} 3',
+        "# corral: left out rows (histogram) from process b: name in use",
     ]
 
 
 def test_counter_overflowing_to_infinity_is_still_valid_output():
-    m = ScriptMetrics()
+    m = ProcessMetrics()
     send(m, name="big", op="inc", value=1e308)
     send(m, name="big", op="inc", value=1e308)
     assert prometheus._number(samples(m)[("big_total", ())]) == "+Inf"
@@ -278,7 +278,7 @@ def test_bad_metric_lines_do_not_stop_the_output(tmp_path, harness):  # noqa: F8
         "print('after', flush=True)\n"
         "time.sleep(60)\n"
     )
-    _, store = harness(script(tmp_path, "s", body))
+    _, store = harness(process(tmp_path, "s", body))
     wait_for(lambda: logged(store, "s", "stdout") == ["before", "after"])
     complaints = [line for line in logged(store, "s", "runner") if "ignored metric line" in line]
     assert len(complaints) == 2 and "too large" in complaints[0]

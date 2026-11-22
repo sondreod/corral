@@ -1,11 +1,11 @@
 """The web interface: one static page plus a small JSON API.
 
     GET  /metrics                          Prometheus metrics (see ``prometheus``)
-    GET  /api/scripts                      status of every script
-    GET  /api/scripts/<name>/logs          log lines (see ``_logs`` for parameters)
-    GET  /api/scripts/<name>/metrics       resource history (see ``_metrics``)
-    GET  /api/scripts/<name>/runs          recent runs, newest first
-    POST /api/scripts/<name>/<action>      action is start, stop or restart
+    GET  /api/processes                    status of every process
+    GET  /api/processes/<name>/logs        log lines (see ``_logs`` for parameters)
+    GET  /api/processes/<name>/metrics     resource history (see ``_metrics``)
+    GET  /api/processes/<name>/runs        recent runs, newest first
+    POST /api/processes/<name>/<action>    action is start, stop or restart
     POST /api/reload                       re-read the config, Procfiles and .env files
     GET  /api/tsdb/metrics                 stored metrics, their kinds and label values
     GET  /api/tsdb/query                   series for a chart (see ``_query``)
@@ -158,22 +158,22 @@ class Handler(BaseHTTPRequestHandler):
                     self._json(self.reload())
                 except ConfigError as exc:
                     raise _Error(HTTPStatus.BAD_REQUEST, str(exc)) from None
-            elif method == "GET" and parts == ["api", "scripts"]:
-                self._json({"scripts": [self._status(s) for s in self.supervisor.scripts.values()]})
-            elif len(parts) == 4 and parts[:2] == ["api", "scripts"]:
-                script = self.supervisor.scripts.get(parts[2])
-                if script is None:
-                    raise _Error(HTTPStatus.NOT_FOUND, "no such script")
+            elif method == "GET" and parts == ["api", "processes"]:
+                self._json({"processes": [self._status(s) for s in self.supervisor.processes.values()]})
+            elif len(parts) == 4 and parts[:2] == ["api", "processes"]:
+                process = self.supervisor.processes.get(parts[2])
+                if process is None:
+                    raise _Error(HTTPStatus.NOT_FOUND, "no such process")
                 if method == "GET" and parts[3] == "logs":
-                    self._logs(script.cfg.name, parse_qs(url.query))
+                    self._logs(process.cfg.name, parse_qs(url.query))
                 elif method == "GET" and parts[3] == "metrics":
-                    self._metrics(script.cfg.name, parse_qs(url.query))
+                    self._metrics(process.cfg.name, parse_qs(url.query))
                 elif method == "GET" and parts[3] == "runs":
                     limit = _int(parse_qs(url.query), "limit") or 50
-                    self._json({"runs": self.store.runs(script.cfg.name, max(1, min(limit, 1000)))})
+                    self._json({"runs": self.store.runs(process.cfg.name, max(1, min(limit, 1000)))})
                 elif method == "POST" and parts[3] in ACTIONS:
-                    getattr(script, parts[3])()
-                    self._json(self._status(script))
+                    getattr(process, parts[3])()
+                    self._json(self._status(process))
                 else:
                     raise _Error(HTTPStatus.NOT_FOUND, "not found")
             else:
@@ -230,9 +230,9 @@ class Handler(BaseHTTPRequestHandler):
             start = end - self.tsdb.retention
         self._json(self.tsdb.query(spec, start, end, _int(params, "points") or 300))
 
-    def _status(self, script) -> dict:
-        status = script.status()
-        status["usage"] = self.monitor.latest(script.cfg.name) if self.monitor else None
+    def _status(self, process) -> dict:
+        status = process.status()
+        status["usage"] = self.monitor.latest(process.cfg.name) if self.monitor else None
         return status
 
     def _metrics(self, name: str, params: dict) -> None:

@@ -1,4 +1,4 @@
-"""Periodic resource measurements of each script's process tree.
+"""Periodic resource measurements of each process tree.
 
 Reads Linux's /proc directly. Where /proc is not available the resource
 figures are simply absent; log line counts are still recorded.
@@ -69,7 +69,7 @@ def read_processes(proc: str = "/proc") -> dict[int, ProcInfo]:
 
 def process_tree(processes: dict[int, ProcInfo], root: int) -> list[ProcInfo]:
     """The root process with everything that belongs to it: its descendants,
-    and members of its session (scripts are started as session leaders, so
+    and members of its session (processes are started as session leaders, so
     that also catches children that were re-parented after their parent died)."""
     if root not in processes:
         return []
@@ -103,7 +103,7 @@ class Monitor:
         self._stop = threading.Event()
         self._lock = threading.Lock()
         self._latest: dict[str, dict] = {}
-        # Per script: (time of the previous sample, {pid: cpu ticks}).
+        # Per process: (time of the previous sample, {pid: cpu ticks}).
         self._previous: dict[str, tuple[float, dict[int, int]]] = {}
         self._cpu_seconds: dict[str, float] = {}
         self._thread = threading.Thread(target=self._loop, name="monitor", daemon=True)
@@ -117,12 +117,12 @@ class Monitor:
             self._thread.join(5)
 
     def latest(self, name: str) -> dict | None:
-        """The most recent measurement of a running script."""
+        """The most recent measurement of a running process."""
         with self._lock:
             return self._latest.get(name)
 
     def cpu_seconds(self, name: str) -> float:
-        """CPU time the script's processes have used since the runner started,
+        """CPU time the process tree has used since the runner started,
         as far as the samples saw it."""
         with self._lock:
             return self._cpu_seconds.get(name, 0.0)
@@ -141,9 +141,9 @@ class Monitor:
     def sample(self) -> None:
         now = time.time()
         processes = None
-        for name, script in self._supervisor.scripts.items():
-            out_lines, err_lines = script.take_line_counts()
-            root = script.root_pid()
+        for name, process in self._supervisor.processes.items():
+            out_lines, err_lines = process.take_line_counts()
+            root = process.root_pid()
             measured = None
             if root is not None:
                 if processes is None:

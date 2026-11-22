@@ -13,7 +13,7 @@ port = 8723
 # (nginx: proxy_set_header Host $host). Listening on localhost, other names
 # are refused, which stops web pages from reaching the interface through DNS
 # rebinding. ["*"] answers to any name.
-# allowed_hosts = ["scripts.example.com"]
+# allowed_hosts = ["corral.example.com"]
 
 [runner]
 # Where the log and metrics databases live.

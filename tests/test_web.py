@@ -6,7 +6,7 @@ import pytest
 
 from corral.web import host_filter, make_server
 
-from test_supervisor import harness, script  # noqa: F401  (fixtures)
+from test_supervisor import harness, process  # noqa: F401  (fixtures)
 
 
 @pytest.mark.parametrize(
@@ -37,7 +37,7 @@ def test_host_filter(bind, allowed, header, ok):
 
 
 def test_foreign_host_names_are_refused(tmp_path, harness):  # noqa: F811
-    supervisor, store = harness(script(tmp_path, "svc", "import time\ntime.sleep(60)\n"))
+    supervisor, store = harness(process(tmp_path, "svc", "import time\ntime.sleep(60)\n"))
     server = make_server("127.0.0.1", 0, supervisor, store)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     port = server.server_address[1]
@@ -51,9 +51,9 @@ def test_foreign_host_names_are_refused(tmp_path, harness):  # noqa: F811
             return exc.code
 
     try:
-        assert status("/api/scripts", f"localhost:{port}") == 200
+        assert status("/api/processes", f"localhost:{port}") == 200
         assert status("/metrics", f"127.0.0.1:{port}") == 200
-        assert status("/api/scripts", f"rebound.example:{port}") == 403
+        assert status("/api/processes", f"rebound.example:{port}") == 403
         assert status("/", "rebound.example") == 403
     finally:
         server.shutdown()

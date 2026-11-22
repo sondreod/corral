@@ -56,7 +56,7 @@ def test_full_config(tmp_path):
     assert [a.name for a in cfg.apps] == ["shop", "other"]
     assert cfg.apps[1].procfile == tmp_path / "other" / "Procs"
 
-    web, worker, nightly = cfg.scripts
+    web, worker, nightly = cfg.processes
     assert (web.name, web.app, web.process, web.command) == ("shop.web", "shop", "web", "uv run app.py")
     assert web.cwd == tmp_path / "shop" and web.path == cfg.path
     assert web.env == {"SHARED": "from-dotenv", "PORT": "2", "APP": "shop"}  # app env wins over .env
@@ -84,7 +84,7 @@ def test_parse_duration_rejects(value):
 
 def test_empty_config(tmp_path):
     cfg = load_config(write(tmp_path, ""))
-    assert cfg.apps == () and cfg.scripts == ()
+    assert cfg.apps == () and cfg.processes == ()
 
 
 def test_procfile_problems(tmp_path):

@@ -1,8 +1,10 @@
 import json
 import math
+import sqlite3
 import threading
 import urllib.error
 import urllib.request
+from contextlib import closing
 
 import pytest
 
@@ -10,21 +12,21 @@ from corral import exposition
 from corral.tsdb import MetricDB, QueryError, Scraper, histogram_quantile, scrape_url
 from corral.web import make_server
 
-from test_supervisor import harness, script, wait_for  # noqa: F401  (fixtures)
+from test_supervisor import harness, process, wait_for  # noqa: F401  (fixtures)
 
 TEXT = """\
 # HELP jobs_total Jobs done.
 # TYPE jobs_total counter
-jobs_total{script="a",kind="x"} 3
-jobs_total{script="b",kind="x"} 10
+jobs_total{process="a",kind="x"} 3
+jobs_total{process="b",kind="x"} 10
 # TYPE temp gauge
-temp{script="a",room="hall \\"1\\"\\nnorth"} -1.5
+temp{process="a",room="hall \\"1\\"\\nnorth"} -1.5
 # TYPE took_seconds histogram
-took_seconds_bucket{script="a",le="0.1"} 1
-took_seconds_bucket{script="a",le="1.0"} 3
-took_seconds_bucket{script="a",le="+Inf"} 4
-took_seconds_sum{script="a"} 2.5
-took_seconds_count{script="a"} 4
+took_seconds_bucket{process="a",le="0.1"} 1
+took_seconds_bucket{process="a",le="1.0"} 3
+took_seconds_bucket{process="a",le="+Inf"} 4
+took_seconds_sum{process="a"} 2.5
+took_seconds_count{process="a"} 4
 # corral: left out something
 loose 7 1700000000000
 broken NaN
@@ -33,13 +35,13 @@ broken NaN
 
 def test_parse_exposition():
     samples = {(s.name, s.labels): s for s in exposition.parse(TEXT)}
-    jobs = samples[("jobs_total", (("kind", "x"), ("script", "a")))]
+    jobs = samples[("jobs_total", (("kind", "x"), ("process", "a")))]
     assert (jobs.value, jobs.family, jobs.kind, jobs.help) == (3, "jobs_total", "counter", "Jobs done.")
-    temp = samples[("temp", (("room", 'hall "1"\nnorth'), ("script", "a")))]
+    temp = samples[("temp", (("process", "a"), ("room", 'hall "1"\nnorth')))]
     assert (temp.value, temp.kind) == (-1.5, "gauge")
-    bucket = samples[("took_seconds_bucket", (("le", "+Inf"), ("script", "a")))]
+    bucket = samples[("took_seconds_bucket", (("le", "+Inf"), ("process", "a")))]
     assert (bucket.family, bucket.kind) == ("took_seconds", "bucket")
-    assert samples[("took_seconds_count", (("script", "a"),))].kind == "counter"
+    assert samples[("took_seconds_count", (("process", "a"),))].kind == "counter"
     assert samples[("loose", ())].kind == "untyped"
     assert not any(name == "broken" for name, _ in samples)  # NaN cannot be stored
 
@@ -62,12 +64,12 @@ def test_histogram_quantile():
 def counter_text(a, b, h=(0, 0, 0)):
     return (
         "# TYPE jobs_total counter\n"
-        f'jobs_total{{script="a"}} {a}\njobs_total{{script="b"}} {b}\n'
+        f'jobs_total{{process="a"}} {a}\njobs_total{{process="b"}} {b}\n'
         "# TYPE took_seconds histogram\n"
         f'took_seconds_bucket{{le="1"}} {h[0]}\ntook_seconds_bucket{{le="2"}} {h[1]}\n'
         f'took_seconds_bucket{{le="+Inf"}} {h[2]}\n'
         "# TYPE temp gauge\n"
-        f'temp{{script="a"}} {a * 10}\n'
+        f'temp{{process="a"}} {a * 10}\n'
     )
 
 
@@ -88,16 +90,16 @@ def values(result):
 def test_query_raw_and_counters(db):
     span = dict(start=60_000, end=60_000 + 299)
     raw = values(db.query({"metric": "temp"}, **span, points=5))
-    assert raw == {(("script", "a"),): [0, 60, 120, 180, 240]}
+    assert raw == {(("process", "a"),): [0, 60, 120, 180, 240]}
 
     inc = values(db.query({"metric": "jobs_total", "fn": "increase"}, **span, points=5))
-    assert inc[(("script", "a"),)] == [None, 6, 6, 6, 6]
-    assert inc[(("script", "b"),)] == [None, 10, 10, 3, 3]  # the drop is a restart, not -117
+    assert inc[(("process", "a"),)] == [None, 6, 6, 6, 6]
+    assert inc[(("process", "b"),)] == [None, 10, 10, 3, 3]  # the drop is a restart, not -117
 
     rate = values(db.query({"metric": "jobs_total", "fn": "per_minute", "agg": "sum"}, **span, points=5))
     assert rate == {(): [None, 16, 16, 9, 9]}
-    per_second = values(db.query({"metric": "jobs_total", "fn": "rate", "match": {"script": "a"}}, **span, points=5))
-    assert per_second == {(("script", "a"),): [None, 0.1, 0.1, 0.1, 0.1]}
+    per_second = values(db.query({"metric": "jobs_total", "fn": "rate", "match": {"process": "a"}}, **span, points=5))
+    assert per_second == {(("process", "a"),): [None, 0.1, 0.1, 0.1, 0.1]}
 
     # two-minute steps add up the increases inside them
     wide = db.query({"metric": "jobs_total", "fn": "increase", "agg": "max"}, 60_000, 60_239, points=2)
@@ -123,7 +125,7 @@ def test_query_histograms(db):
 @pytest.mark.parametrize(
     "query",
     [{}, {"metric": ""}, {"metric": "x", "fn": "sql"}, {"metric": "x", "agg": "median"},
-     {"metric": "x", "match": {"a": 1}}, {"metric": "x", "by": "script"}, {"metric": "x", "fn": "quantile", "q": 2}],
+     {"metric": "x", "match": {"a": 1}}, {"metric": "x", "by": "process"}, {"metric": "x", "fn": "quantile", "q": 2}],
 )
 def test_bad_queries(db, query):
     with pytest.raises(QueryError):
@@ -133,12 +135,12 @@ def test_bad_queries(db, query):
 def test_catalog_and_prune(db):
     cat = {m["name"]: m for m in db.catalog()}
     assert cat["jobs_total"]["kind"] == "counter"
-    assert cat["jobs_total"]["labels"] == {"script": ["a", "b"]}
+    assert cat["jobs_total"]["labels"] == {"process": ["a", "b"]}
     assert cat["took_seconds_bucket"]["labels"]["le"] == ["1", "2", "+Inf"]  # numeric order
 
     db.prune(now=60_000 + 240 + 86400)  # keeps only the last scrape
     assert values(db.query({"metric": "temp"}, 60_000, 60_299, points=5)) == {
-        (("script", "a"),): [None, None, None, None, 240]
+        (("process", "a"),): [None, None, None, None, 240]
     }
     db.ingest(60_300, exposition.parse('# TYPE fresh gauge\nfresh 1\n'))
     db.prune(now=60_300 + 86400)
@@ -174,7 +176,7 @@ def test_scrape_url():
 
 
 def test_scrape_and_api_end_to_end(tmp_path, harness):  # noqa: F811
-    svc = script(tmp_path, "svc", "import time\nprint('hi')\ntime.sleep(60)\n")
+    svc = process(tmp_path, "svc", "import time\nprint('hi')\ntime.sleep(60)\n")
     supervisor, store = harness(svc)
     db = MetricDB(tmp_path / "metrics.sqlite3", interval=60)
     server = make_server("127.0.0.1", 0, supervisor, store, tsdb=db)
@@ -193,7 +195,7 @@ def test_scrape_and_api_end_to_end(tmp_path, harness):  # noqa: F811
             return exc.code, json.loads(exc.read())
 
     try:
-        wait_for(lambda: supervisor.scripts["svc"].counters()["lines"]["stdout"] == 1)
+        wait_for(lambda: supervisor.processes["svc"].counters()["lines"]["stdout"] == 1)
         scraper = Scraper(db, scrape_url("127.0.0.1", server.server_address[1]))
         import time
         now = int(time.time() // 60 * 60)
@@ -203,9 +205,9 @@ def test_scrape_and_api_end_to_end(tmp_path, harness):  # noqa: F811
         status, cat = call("/api/tsdb/metrics")
         assert status == 200 and cat["interval"] == 60
         names = {m["name"] for m in cat["metrics"]}
-        assert {"corral_script_up", "corral_script_log_lines_total"} <= names
+        assert {"corral_process_up", "corral_process_log_lines_total"} <= names
 
-        q = json.dumps({"metric": "corral_script_up", "match": {"script": "svc"}})
+        q = json.dumps({"metric": "corral_process_up", "match": {"process": "svc"}})
         status, result = call("/api/tsdb/query?" + urllib.parse.urlencode({"q": q, "range": 600}))
         assert status == 200 and result["series"][0]["values"][-1][1] == 1
         assert call("/api/tsdb/query?q=nonsense")[0] == 400
@@ -222,3 +224,31 @@ def test_scrape_and_api_end_to_end(tmp_path, harness):  # noqa: F811
         assert call(f"/api/dashboards/{d['id']}", "DELETE")[0] == 404
     finally:
         server.shutdown()
+
+
+def test_migrates_script_names(tmp_path):
+    path = tmp_path / "m.sqlite3"
+    old = MetricDB(path, interval=60, retention=86400)
+    up = "# TYPE corral_script_up gauge\ncorral_script_up{app=\"shop\",script=\"shop.web\"} 1\n"
+    old.ingest(60_000, exposition.parse(up))
+    old.ingest(60_060, exposition.parse('corral_script_up{script="shop.db"} 1\n'))
+    old.ingest(60_120, exposition.parse('corral_process_up{process="shop.db"} 0\n'))  # already new: merged
+    old.ingest(60_000, exposition.parse('jobs_total{kind="x",script="shop.web"} 4\n'))
+    panel = {"id": "p1", "type": "line", "x": 0, "y": 0, "w": 6, "h": 8,
+             "query": {"metric": "corral_script_up", "fn": "raw", "match": {"script": "shop.web"}, "by": ["script", "app"]}}
+    d = old.create_dashboard({"name": "Ops", "spec": {"range": 3600, "panels": [panel]}})
+    with closing(sqlite3.connect(path)) as conn:  # as a database from before the rename
+        conn.execute("PRAGMA user_version = 0")
+        conn.commit()
+
+    db = MetricDB(path, interval=60, retention=86400)
+    names = {m["name"]: m["labels"] for m in db.catalog()}
+    assert set(names) == {"corral_process_up", "jobs_total"}
+    assert names["corral_process_up"] == {"app": ["shop"], "process": ["shop.db", "shop.web"]}
+    assert names["jobs_total"] == {"kind": ["x"], "process": ["shop.web"]}
+    shop_db = values(db.query({"metric": "corral_process_up", "match": {"process": "shop.db"}},
+                              start=60_000, end=60_179, points=3))
+    assert shop_db == {(("process", "shop.db"),): [None, 1, 0]}
+    assert db.dashboard(d["id"])["spec"]["panels"][0]["query"] == {
+        "metric": "corral_process_up", "fn": "raw", "match": {"process": "shop.web"}, "by": ["process", "app"],
+    }

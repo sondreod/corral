@@ -1,6 +1,6 @@
-"""Metrics that scripts report about themselves.
+"""Metrics that processes report about themselves.
 
-A script reports a metric by printing a line that starts with ``@metric``
+A process reports a metric by printing a line that starts with ``@metric``
 followed by a JSON object:
 
     @metric {"name": "jobs", "op": "declare", "type": "counter", "help": "Jobs done"}
@@ -19,7 +19,7 @@ A metric that was never declared gets its type from the first operation: a
 counter for ``inc``, a gauge for ``set``, a histogram for ``observe``; a
 ``type`` given on that line overrides the guess.
 
-The values live in the runner, not in the script, so they survive the script
+The values live in the runner, not in the process, so they survive the process
 exiting: a counter keeps counting across restarts.
 """
 
@@ -33,11 +33,11 @@ import threading
 PREFIX = "@metric "
 TYPES = ("counter", "gauge", "histogram", "summary")
 DEFAULT_BUCKETS = (0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 2.5, 5.0, 7.5, 10.0)
-MAX_SERIES = 2000  # per script, so a runaway label cannot eat the runner's memory
+MAX_SERIES = 2000  # per process, so a runaway label cannot eat the runner's memory
 
 _NAME_RE = re.compile(r"^[a-zA-Z_:][a-zA-Z0-9_:]*$")
 _LABEL_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
-_RESERVED_LABELS = ("script", "app", "le", "quantile")
+_RESERVED_LABELS = ("process", "app", "le", "quantile")
 _OPS = {"inc": ("counter", "gauge"), "set": ("gauge",), "observe": ("histogram", "summary")}
 _GUESS = {"inc": "counter", "set": "gauge", "observe": "histogram"}
 
@@ -68,8 +68,8 @@ class _Metric:
         self.series: dict[tuple[tuple[str, str], ...], float | list] = {}
 
 
-class ScriptMetrics:
-    """The metrics one script has reported."""
+class ProcessMetrics:
+    """The metrics one process has reported."""
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -114,7 +114,7 @@ class ScriptMetrics:
                     raise MetricError("only a histogram has buckets")
                 buckets = (buckets or DEFAULT_BUCKETS) if kind == "histogram" else ()
                 if metric is None or (metric.kind, metric.buckets) != (kind, buckets):
-                    # New, or the script changed its mind: start over.
+                    # New, or the process changed its mind: start over.
                     if metric is not None:
                         self._series -= len(metric.series)
                     self._metrics[name] = _Metric(kind, help, buckets)

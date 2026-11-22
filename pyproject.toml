@@ -1,8 +1,10 @@
 [project]
 name = "corral"
 version = "0.1.0"
-description = "Runs PEP 723 scripts under supervision, with a web view of their status and logs"
+description = "Runs the processes in Procfiles under supervision, with a web view of their status, logs, metrics and dashboards"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = []
 

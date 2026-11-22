@@ -104,7 +104,7 @@
   body.kiosk #dashboard { padding: 12px; }
   body.kiosk:not(.awake) { cursor: none; }
 
-  /* state colours, shared by cards and the script header */
+  /* state colours, shared by cards and the process header */
   .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--grey); flex: none; }
   .state { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .03em; color: var(--grey); }
   .s-running .dot { background: var(--green); } .s-running .state { color: var(--green); }
@@ -139,11 +139,11 @@
   .spark .head { display: flex; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 11px; }
   .spark .max { font-variant-numeric: tabular-nums; }
 
-  /* script page */
-  #script { flex: 1; display: flex; flex-direction: column; min-height: 0; }
-  .scripthead { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 12px 16px 0; }
-  .scripthead h2 { font-size: 17px; margin: 0; overflow-wrap: anywhere; }
-  .scripthead .grow { flex: 1; }
+  /* process page */
+  #process { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  .processhead { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 12px 16px 0; }
+  .processhead h2 { font-size: 17px; margin: 0; overflow-wrap: anywhere; }
+  .processhead .grow { flex: 1; }
   .tabs { display: flex; gap: 4px; padding: 10px 16px 0; border-bottom: 1px solid var(--border); }
   .tabs a { padding: 6px 14px; color: var(--muted); border: 1px solid transparent; border-bottom: 0;
             border-radius: 6px 6px 0 0; margin-bottom: -1px; }
@@ -281,7 +281,7 @@
 <header>
   <h1><a href="#/">corral</a></h1>
   <nav>
-    <a href="#/" id="nav-scripts">Scripts</a>
+    <a href="#/" id="nav-processes">Processes</a>
     <a href="#/d" id="nav-dash">Dashboards</a>
   </nav>
   <span class="grow"></span>
@@ -302,9 +302,9 @@
   <div id="cards"></div>
 </section>
 
-<section id="script" hidden>
-  <div class="scripthead" id="scripthead">
-    <a href="#/">← All scripts</a>
+<section id="process" hidden>
+  <div class="processhead" id="processhead">
+    <a href="#/">← All processes</a>
     <span class="dot"></span>
     <h2 id="title"></h2>
     <span class="state" id="headstate"></span>
@@ -439,14 +439,14 @@ const svg = (tag, attrs) => {
   return node;
 };
 
-let scripts = [];
+let processes = [];
 let route = { view: "overview" };
 let view = 0;          // bumped whenever the log view is reset; stale responses are dropped
 let firstId = null, lastId = null, tailBusy = false, loaded = false;
 let monitorRange = RANGES[0][1];
 let monitorData = null;               // last metrics response shown on the Monitoring tab
-const overviewData = new Map();       // script name -> last metrics response
-const cards = new Map();              // script name -> card elements
+const overviewData = new Map();       // process name -> last metrics response
+const cards = new Map();              // process name -> card elements
 
 async function api(path, options) {
   const res = await fetch(path, options);
@@ -454,7 +454,7 @@ async function api(path, options) {
   if (!res.ok) throw new Error(body.error || res.statusText);
   return body;
 }
-const scriptUrl = (name, rest) => `/api/scripts/${encodeURIComponent(name)}/${rest}`;
+const processUrl = (name, rest) => `/api/processes/${encodeURIComponent(name)}/${rest}`;
 
 function showError(err) {
   $("error").hidden = !err;
@@ -492,7 +492,7 @@ function fmtBytes(v) {
 }
 const rangeLabel = (seconds) => (RANGES.find((r) => r[1] === seconds) || ["range"])[0];
 
-// ---- script status -----------------------------------------------------
+// ---- process status -----------------------------------------------------
 
 function describe(s, now) {
   const parts = [];
@@ -525,9 +525,9 @@ function fillActions(node, s) {
     b.onclick = async (ev) => {
       ev.stopPropagation();
       try {
-        await api(scriptUrl(s.name, action), { method: "POST", headers: { "X-Corral": "1" } });
+        await api(processUrl(s.name, action), { method: "POST", headers: { "X-Corral": "1" } });
       } catch (err) { showError(err); }
-      refreshScripts();
+      refreshProcesses();
     };
     node.append(b);
   };
@@ -594,15 +594,15 @@ function buildCard(s) {
 function renderOverview() {
   const now = Date.now() / 1000;
   const box = $("cards");
-  const names = scripts.map((s) => s.name + "\t" + s.cwd).join("\n");
+  const names = processes.map((s) => s.name + "\t" + s.cwd).join("\n");
   if (box.dataset.names !== names) {
     box.dataset.names = names;
     cards.clear();
     box.replaceChildren();
-    if (!scripts.length) box.append(el("div", "empty", "No apps configured."));
+    if (!processes.length) box.append(el("div", "empty", "No apps configured."));
     // One section per app, in config order (the processes of an app are listed together).
     let grid = null, app = null;
-    for (const s of scripts) {
+    for (const s of processes) {
       if (!grid || s.app !== app) {
         app = s.app;
         const head = el("div", "apphead");
@@ -616,7 +616,7 @@ function renderOverview() {
     }
     refreshOverviewMetrics();
   }
-  for (const s of scripts) {
+  for (const s of processes) {
     const c = cards.get(s.name);
     c.card.className = "card s-" + s.state;
     c.state.textContent = s.state;
@@ -632,7 +632,7 @@ function drawOverviewCharts(name) {
   fillHistoryTiles(c.t, data, rangeLabel(OVERVIEW_RANGE));
   const series = (key, scale = 1) =>
     [{ color: "var(--series-1)", values: data.points.map((p) => [p.t, p[key] == null ? null : p[key] / scale]) }];
-  // One scale for all cards, so the charts can be compared between scripts.
+  // One scale for all cards, so the charts can be compared between processes.
   const top = (key, scale = 1) => niceMax(Math.max(0, ...[...overviewData.values()].flatMap(
     (d) => d.points.map((p) => p[key] || 0))) / scale);
   const cpuTop = top("cpu"), memTop = top("rss", GIB);
@@ -644,13 +644,13 @@ function drawOverviewCharts(name) {
 
 async function refreshOverviewMetrics() {
   if (route.view !== "overview") return;
-  await Promise.all(scripts.map(async (s) => {
+  await Promise.all(processes.map(async (s) => {
     try {
-      overviewData.set(s.name, await api(scriptUrl(s.name, `metrics?range=${OVERVIEW_RANGE}&points=60`)));
+      overviewData.set(s.name, await api(processUrl(s.name, `metrics?range=${OVERVIEW_RANGE}&points=60`)));
     } catch (err) { /* the status poll reports connection problems */ }
   }));
   for (const name of [...overviewData.keys()]) if (!cards.has(name)) overviewData.delete(name);
-  scripts.forEach((s) => drawOverviewCharts(s.name));  // all of them: the shared scale may have changed
+  processes.forEach((s) => drawOverviewCharts(s.name));  // all of them: the shared scale may have changed
 }
 
 // ---- charts ------------------------------------------------------------
@@ -785,8 +785,8 @@ const CHARTS = [
     fmt: fmtCpu, series: [["cpu", "CPU", 1]] },
   { title: "Memory", hint: "Resident memory, whole process tree",
     fmt: (v) => fmtBytes(v * 1048576), series: [["rss", "Memory", 1048576]] },
-  { title: "Threads", hint: "Across all processes of the script", series: [["threads", "Threads", 1]] },
-  { title: "Open files", hint: "File descriptors across all processes", series: [["fds", "Open files", 1]] },
+  { title: "Threads", hint: "Whole process tree", series: [["threads", "Threads", 1]] },
+  { title: "Open files", hint: "File descriptors, whole process tree", series: [["fds", "Open files", 1]] },
   { title: "Log output", hint: "Lines per minute", perMinute: true,
     series: [["out_lines", "stdout", 1], ["err_lines", "stderr", 1]] },
 ];
@@ -858,8 +858,8 @@ async function loadMonitor() {
     b.classList.toggle("active", Number(b.dataset.range) === range));
   try {
     const [metrics, runs] = await Promise.all([
-      api(scriptUrl(name, `metrics?range=${range}&points=180`)),
-      api(scriptUrl(name, "runs?limit=30")),
+      api(processUrl(name, `metrics?range=${range}&points=180`)),
+      api(processUrl(name, "runs?limit=30")),
     ]);
     if (route.view !== "monitor" || route.name !== name || monitorRange !== range) return;
     monitorData = metrics;
@@ -884,7 +884,7 @@ function logUrl(extra) {
   const streams = [...document.querySelectorAll(".stream")];
   if (!streams.every((c) => c.checked))
     params.set("streams", streams.filter((c) => c.checked).map((c) => c.value).join(","));
-  return scriptUrl(route.name, `logs?${params}`);
+  return processUrl(route.name, `logs?${params}`);
 }
 
 function lineNode(l) {
@@ -1782,7 +1782,7 @@ $("reload").onclick = async () => {
     showError(null);
     clearTimeout(reloadTimer);
     reloadTimer = setTimeout(() => { $("reloadmsg").textContent = ""; }, 8000);
-    refreshScripts();
+    refreshProcesses();
   } catch (err) {
     $("reloadmsg").textContent = "";
     showError("Reload failed, nothing was changed: " + (err.message || err));
@@ -1793,7 +1793,7 @@ $("reload").onclick = async () => {
 
 // ---- routing and refresh -----------------------------------------------
 
-// "#/" is the overview; "#/s/<name>/logs" and "#/s/<name>/monitor" are a script's tabs;
+// "#/" is the overview; "#/s/<name>/logs" and "#/s/<name>/monitor" are a process's tabs;
 // "#/d" lists the dashboards and "#/d/<id>" shows one.
 function parseRoute() {
   const [path, query] = location.hash.replace(/^#\/?/, "").split("?");
@@ -1807,11 +1807,11 @@ function parseRoute() {
   return { view: "overview" };
 }
 
-function renderScriptHead() {
-  const s = scripts.find((x) => x.name === route.name);
+function renderProcessHead() {
+  const s = processes.find((x) => x.name === route.name);
   $("title").textContent = route.name;
   if (!s) return;
-  $("scripthead").className = "scripthead s-" + s.state;
+  $("processhead").className = "processhead s-" + s.state;
   $("headstate").textContent = s.state;
   $("headcommand").textContent = s.command ? "$ " + s.command : "";
   fillDetail($("headdetail"), s, Date.now() / 1000);
@@ -1822,13 +1822,13 @@ function renderScriptHead() {
 function applyRoute() {
   const before = route;
   route = parseRoute();
-  const onScript = route.view === "logs" || route.view === "monitor";
+  const onProcess = route.view === "logs" || route.view === "monitor";
   const onDash = route.view === "dashlist" || route.view === "dashboard";
   $("overview").hidden = route.view !== "overview";
-  $("script").hidden = !onScript;
+  $("process").hidden = !onProcess;
   $("dashlist").hidden = route.view !== "dashlist";
   $("dashboard").hidden = route.view !== "dashboard";
-  $("nav-scripts").classList.toggle("active", !onDash);
+  $("nav-processes").classList.toggle("active", !onDash);
   $("nav-dash").classList.toggle("active", onDash);
   document.title = route.view === "dashboard" && dash && dash.id === route.id ? dash.name + " · corral" : "corral";
   applyTheme();
@@ -1843,10 +1843,10 @@ function applyRoute() {
     else if (before.kiosk !== route.kiosk) requestAnimationFrame(refreshPanels);  // the panels changed size
     return;
   }
-  if (!onScript) {
+  if (!onProcess) {
     renderOverview();
     refreshOverviewMetrics();
-    scripts.forEach((s) => drawOverviewCharts(s.name));  // widths may have changed while hidden
+    processes.forEach((s) => drawOverviewCharts(s.name));  // widths may have changed while hidden
     return;
   }
   const base = `#/s/${encodeURIComponent(route.name)}/`;
@@ -1857,7 +1857,7 @@ function applyRoute() {
   $("logs").hidden = route.view !== "logs";
   $("monitor").hidden = route.view !== "monitor";
   delete $("headactions").dataset.key;
-  renderScriptHead();
+  renderProcessHead();
   resetLog();
   if (route.view === "monitor") {
     monitorData = null;
@@ -1865,9 +1865,9 @@ function applyRoute() {
   }
 }
 
-async function refreshScripts() {
+async function refreshProcesses() {
   try {
-    scripts = (await api("/api/scripts")).scripts;
+    processes = (await api("/api/processes")).processes;
     showError(null);
   } catch (err) {
     showError("Cannot reach corral: " + (err.message || err));
@@ -1875,15 +1875,15 @@ async function refreshScripts() {
   }
   if (route.view === "overview") renderOverview();
   else if (route.view !== "logs" && route.view !== "monitor") return;
-  else if (scripts.some((s) => s.name === route.name)) renderScriptHead();
-  else location.hash = "#/";   // the script no longer exists
+  else if (processes.some((s) => s.name === route.name)) renderProcessHead();
+  else location.hash = "#/";   // the process no longer exists
 }
 
 let resizeTimer;
 window.addEventListener("resize", () => {
   clearTimeout(resizeTimer);
   resizeTimer = setTimeout(() => {
-    if (route.view === "overview") scripts.forEach((s) => drawOverviewCharts(s.name));
+    if (route.view === "overview") processes.forEach((s) => drawOverviewCharts(s.name));
     else if (route.view === "dashboard") redrawPanels();
     else drawMonitor();
   }, 150);
@@ -1903,8 +1903,8 @@ new ResizeObserver(() => {
 
 buildMonitor();
 loadCatalog().catch(() => {});
-refreshScripts().then(applyRoute);
-setInterval(refreshScripts, 2000);
+refreshProcesses().then(applyRoute);
+setInterval(refreshProcesses, 2000);
 setInterval(tail, 1500);
 setInterval(() => { refreshOverviewMetrics(); loadMonitor(); }, 10000);
 </script>

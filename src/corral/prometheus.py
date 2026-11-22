@@ -1,8 +1,7 @@
 """The runner's own metrics in the Prometheus text exposition format.
 
-Everything is labelled with the process's name (``script``, e.g.
-``shop.web``; the name dates from when corral ran scripts) and its app
-(``app``). After the runner's own metrics come the ones processes report
+Everything is labelled with the process's name (``process``, e.g.
+``shop.web``) and its app (``app``). After the runner's own metrics come the ones processes report
 themselves (see ``custom``). Counters start at zero when the runner starts.
 Resource figures come from the monitor's most recent sample, so they are up
 to one ``sample_interval`` old, and are only present while the process is
@@ -69,32 +68,32 @@ def render(supervisor: Supervisor, monitor: Monitor | None = None) -> str:
     info = family("build_info", "gauge", "The running corral version.")
     info.add(1, version=__version__)
 
-    state = family("script_state", "gauge", "1 for the state the script is in, 0 for the others.")
-    enabled = family("script_enabled", "gauge", "1 if the script is set to run, 0 if it was stopped or disabled.")
-    up = family("script_up", "gauge", "1 if the script has a running process.")
-    runs = family("script_runs_total", "counter", "Times the script was started.")
+    state = family("process_state", "gauge", "1 for the state the process is in, 0 for the others.")
+    enabled = family("process_enabled", "gauge", "1 if the process is set to run, 0 if it was stopped or has enabled = false.")
+    up = family("process_up", "gauge", "1 while the process is running.")
+    runs = family("process_runs_total", "counter", "Times the process was started.")
     failures = family(
-        "script_run_failures_total",
+        "process_run_failures_total",
         "counter",
         "Runs that could not start or ended with a non-zero exit code, not counting requested stops.",
     )
-    lines = family("script_log_lines_total", "counter", "Lines the script printed.")
+    lines = family("process_log_lines_total", "counter", "Lines the process printed.")
     exit_code = family(
-        "script_last_exit_code", "gauge", "Exit code of the last finished run (negative: killed by that signal)."
+        "process_last_exit_code", "gauge", "Exit code of the last finished run (negative: killed by that signal)."
     )
-    started = family("script_last_start_time_seconds", "gauge", "When the last run started, as a Unix time.")
-    exited = family("script_last_exit_time_seconds", "gauge", "When the last run ended, as a Unix time.")
-    next_run = family("script_next_run_time_seconds", "gauge", "When a process in backoff restarts, as a Unix time.")
+    started = family("process_last_start_time_seconds", "gauge", "When the last run started, as a Unix time.")
+    exited = family("process_last_exit_time_seconds", "gauge", "When the last run ended, as a Unix time.")
+    next_run = family("process_next_run_time_seconds", "gauge", "When a process in backoff restarts, as a Unix time.")
     cpu = family(
-        "script_cpu_seconds_total", "counter", "CPU time used by the script's process tree, user and system."
+        "process_cpu_seconds_total", "counter", "CPU time used by the process tree, user and system."
     )
-    memory = family("script_resident_memory_bytes", "gauge", "Resident memory of the script's process tree.")
-    threads = family("script_threads", "gauge", "Threads in the script's process tree.")
-    fds = family("script_open_fds", "gauge", "Open file descriptors in the script's process tree.")
+    memory = family("process_resident_memory_bytes", "gauge", "Resident memory of the process tree.")
+    threads = family("process_threads", "gauge", "Threads in the process tree.")
+    fds = family("process_open_fds", "gauge", "Open file descriptors in the process tree.")
 
-    for name, script in supervisor.scripts.items():
-        status, counters = script.status(), script.counters()
-        ids = _ids(name, script)
+    for name, process in supervisor.processes.items():
+        status, counters = process.status(), process.counters()
+        ids = _ids(name, process)
         for candidate in STATES:
             state.add(int(status["state"] == candidate), **ids, state=candidate)
         enabled.add(int(status["enabled"]), **ids)
@@ -119,26 +118,26 @@ def render(supervisor: Supervisor, monitor: Monitor | None = None) -> str:
     return "\n".join(lines_out) + "\n"
 
 
-def _ids(name: str, script) -> dict[str, str]:
+def _ids(name: str, process) -> dict[str, str]:
     """The labels that say which process a sample is about."""
-    return {"script": name, "app": script.cfg.app} if script.cfg.app else {"script": name}
+    return {"process": name, "app": process.cfg.app} if process.cfg.app else {"process": name}
 
 
 def _custom(supervisor: Supervisor, taken: set[str]) -> list[str]:
-    """What the scripts report themselves, with a ``script`` label added.
-    The same metric from several scripts becomes one family; if they disagree
-    about its type, the first script wins and the others are left out."""
+    """What the processes report themselves, with a ``process`` label added.
+    The same metric from several processes becomes one family; if they disagree
+    about its type, the first process wins and the others are left out."""
     merged: dict[str, tuple[str, str, list[str]]] = {}
     skipped = []
-    for script_name, script in supervisor.scripts.items():
-        for name, kind, help, samples in script.metrics.families():
+    for process_name, process in supervisor.processes.items():
+        for name, kind, help, samples in process.metrics.families():
             if name in taken or (name in merged and merged[name][0] != kind):
-                skipped.append(f"# corral: left out {name} ({kind}) from script {script_name}: name in use")
+                skipped.append(f"# corral: left out {name} ({kind}) from process {process_name}: name in use")
                 continue
             if name not in merged:
                 merged[name] = (kind, help, [])
             merged[name][2].extend(
-                f"{sample}{_labels({**_ids(script_name, script), **labels})} {_number(value)}"
+                f"{sample}{_labels({**_ids(process_name, process), **labels})} {_number(value)}"
                 for sample, labels, value in samples
             )
     out = []

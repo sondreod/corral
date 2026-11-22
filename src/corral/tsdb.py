@@ -1,7 +1,7 @@
 """Stored metrics and saved dashboards.
 
 A ``Scraper`` thread fetches corral's own ``/metrics`` endpoint once per
-``scrape_interval`` (which includes every script's own metrics) and stores
+``scrape_interval`` (which includes every process's own metrics) and stores
 each sample in a separate SQLite database, ``metrics.sqlite3``. Samples are
 kept for ``retention`` seconds. ``MetricDB.query`` turns them into series for
 the dashboards; the dashboards themselves are stored in the same database as
@@ -29,7 +29,7 @@ from . import exposition
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS series (
     id     INTEGER PRIMARY KEY,
-    name   TEXT NOT NULL,          -- sample name, e.g. corral_script_runs_total
+    name   TEXT NOT NULL,          -- sample name, e.g. corral_process_runs_total
     labels TEXT NOT NULL,          -- JSON object, keys sorted
     family TEXT NOT NULL,          -- the # TYPE name it belongs to
     kind   TEXT NOT NULL,          -- counter, gauge, bucket or untyped
@@ -116,6 +116,58 @@ def histogram_quantile(q: float, buckets: list[tuple[float, float]]) -> float | 
     return buckets[-2][0] if len(buckets) > 1 else None
 
 
+_OLD_PREFIX, _NEW_PREFIX = "corral_script_", "corral_process_"
+
+
+def _renamed(name: str) -> str:
+    return _NEW_PREFIX + name[len(_OLD_PREFIX):] if name.startswith(_OLD_PREFIX) else name
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Version 1: corral_script_* metrics became corral_process_*, and the
+    ``script`` label became ``process``, in stored series and dashboards."""
+    if conn.execute("PRAGMA user_version").fetchone()[0] >= 1:
+        return
+    with conn:
+        rows = conn.execute("SELECT id, name, labels, family FROM series").fetchall()
+        for sid, name, labels, family in rows:
+            parsed = json.loads(labels)
+            if not name.startswith(_OLD_PREFIX) and "script" not in parsed:
+                continue
+            if "script" in parsed:
+                parsed["process"] = parsed.pop("script")
+            new_labels = json.dumps(dict(sorted(parsed.items())), separators=(",", ":"))
+            new_name = _renamed(name)
+            clash = conn.execute(
+                "SELECT id FROM series WHERE name = ? AND labels = ?", (new_name, new_labels)
+            ).fetchone()
+            if clash:  # already recorded under the new name: keep both histories in one series
+                conn.execute(
+                    "INSERT OR IGNORE INTO samples (series, ts, value)"
+                    " SELECT ?, ts, value FROM samples WHERE series = ?",
+                    (clash[0], sid),
+                )
+                conn.execute("DELETE FROM samples WHERE series = ?", (sid,))
+                conn.execute("DELETE FROM series WHERE id = ?", (sid,))
+            else:
+                conn.execute(
+                    "UPDATE series SET name = ?, labels = ?, family = ? WHERE id = ?",
+                    (new_name, new_labels, _renamed(family), sid),
+                )
+        for did, spec in conn.execute("SELECT id, spec FROM dashboards").fetchall():
+            spec = json.loads(spec)
+            for panel in spec.get("panels", []):
+                q = panel.get("query") or {}
+                if isinstance(q.get("metric"), str):
+                    q["metric"] = _renamed(q["metric"])
+                if isinstance(q.get("match"), dict) and "script" in q["match"]:
+                    q["match"]["process"] = q["match"].pop("script")
+                if isinstance(q.get("by"), list):
+                    q["by"] = ["process" if k == "script" else k for k in q["by"]]
+            conn.execute("UPDATE dashboards SET spec = ? WHERE id = ?", (json.dumps(spec), did))
+        conn.execute("PRAGMA user_version = 1")
+
+
 class MetricDB:
     def __init__(self, path: str | Path, interval: float = 60.0, retention: float = 30 * 86400):
         self.path = str(path)
@@ -126,6 +178,7 @@ class MetricDB:
         with closing(self._connect()) as conn:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.executescript(_SCHEMA)
+            _migrate(conn)
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.path, timeout=30)

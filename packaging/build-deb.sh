@@ -42,6 +42,7 @@ install -d "$root/$demo/src/demo_project"
 install -m 644 examples/demo-project/pyproject.toml "$root/$demo/"
 install -m 644 examples/demo-project/src/demo_project/*.py "$root/$demo/src/demo_project/"
 install -m 644 README.md "$root/usr/share/doc/corral/"
+install -m 644 LICENSE "$root/usr/share/doc/corral/copyright"
 install -m 755 packaging/postinst packaging/prerm packaging/postrm "$root/DEBIAN/"
 echo /etc/corral/config.toml > "$root/DEBIAN/conffiles"
 

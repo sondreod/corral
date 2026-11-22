@@ -6,7 +6,7 @@ from corral.store import LogStore
 
 @pytest.fixture
 def store(tmp_path):
-    s = LogStore(tmp_path / "logs.sqlite3", max_lines_per_script=50)
+    s = LogStore(tmp_path / "logs.sqlite3", max_lines_per_process=50)
     yield s
     s.close()
 
@@ -19,13 +19,13 @@ def test_query_filters(store):
     store.append("a", "stdout", "hello world")
     store.append("a", "stderr", "Traceback: boom")
     store.append("a", "runner", "exited with code 1")
-    store.append("b", "stdout", "other script")
+    store.append("b", "stdout", "other process")
     store.flush()
 
     assert lines(store.query("a")) == ["hello world", "Traceback: boom", "exited with code 1"]
     assert lines(store.query("a", text="BOOM")) == ["Traceback: boom"]
     assert lines(store.query("a", streams=("stdout", "runner"))) == ["hello world", "exited with code 1"]
-    assert lines(store.query("b")) == ["other script"]
+    assert lines(store.query("b")) == ["other process"]
     assert store.query("a", text="nothing") == []
 
 
@@ -135,3 +135,35 @@ def test_open_runs_are_closed_on_startup(tmp_path):
     assert second.runs("b")[0]["ended"] == 100
     assert second.run_summary("a", 0) == {"total": 1, "failed": 0}
     second.close()
+
+
+def test_migrates_the_script_column(tmp_path):
+    import sqlite3
+    from contextlib import closing
+
+    path = tmp_path / "logs.sqlite3"
+    with closing(sqlite3.connect(path)) as conn:  # the schema from before the rename
+        conn.executescript(
+            "CREATE TABLE logs (id INTEGER PRIMARY KEY AUTOINCREMENT, script TEXT NOT NULL, ts REAL NOT NULL,"
+            " stream TEXT NOT NULL, line TEXT NOT NULL);"
+            "CREATE INDEX logs_script_id ON logs (script, id);"
+            "CREATE TABLE runs (script TEXT NOT NULL, started REAL NOT NULL, ended REAL, exit_code INTEGER,"
+            " note TEXT, PRIMARY KEY (script, started));"
+            "CREATE TABLE samples (script TEXT NOT NULL, ts REAL NOT NULL, cpu REAL, rss INTEGER, threads INTEGER,"
+            " fds INTEGER, out_lines INTEGER NOT NULL, err_lines INTEGER NOT NULL);"
+            "CREATE INDEX samples_script_ts ON samples (script, ts);"
+            "INSERT INTO logs (script, ts, stream, line) VALUES ('shop.web', 1, 'stdout', 'kept');"
+            "INSERT INTO runs (script, started, ended, exit_code) VALUES ('shop.web', 1, 2, 0);"
+        )
+    s = LogStore(path)
+    try:
+        assert lines(s.query("shop.web")) == ["kept"]
+        assert [r["exit_code"] for r in s.runs("shop.web")] == [0]
+        s.append("shop.web", "stdout", "new")
+        s.flush()
+        assert lines(s.query("shop.web")) == ["kept", "new"]
+    finally:
+        s.close()
+    with closing(sqlite3.connect(path)) as conn:
+        indexes = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'index'")}
+    assert "logs_script_id" not in indexes and "logs_process_id" in indexes

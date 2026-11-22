@@ -3,7 +3,7 @@
 # dependencies = ["corral"]
 #
 # [tool.uv.sources]
-# corral = { path = ".." }   # this checkout; see "Metrics from your scripts" in the README
+# corral = { path = ".." }   # this checkout; see "Metrics from your processes" in the README
 # ///
 """Example script that reports metrics with corral.metrics: a batch every 15 seconds."""
 

@@ -113,22 +113,21 @@ charts stay empty; runs and log output are still recorded.
 ## Prometheus metrics
 
 `GET /metrics` serves the runner's own figures in the Prometheus text format,
-one series per process, labelled with its full name (`script="shop.web"`; the
-label and metric names date from when corral ran scripts) and its app
-(`app="shop"`):
+one series per process, labelled with its full name (`process="shop.web"`)
+and its app (`app="shop"`):
 
 | Metric | Type | Meaning |
 | --- | --- | --- |
-| `corral_script_state{state=…}` | gauge | 1 for the current state (`stopped`, `starting`, `running`, `stopping`, `backoff`), 0 for the others |
-| `corral_script_up` | gauge | 1 while the process is running |
-| `corral_script_enabled` | gauge | 0 after Stop/Disable |
-| `corral_script_runs_total` | counter | starts |
-| `corral_script_run_failures_total` | counter | runs that could not start or exited non-zero (requested stops excluded) |
-| `corral_script_log_lines_total{stream=…}` | counter | lines printed on `stdout` / `stderr` |
-| `corral_script_cpu_seconds_total` | counter | CPU time of the process tree |
-| `corral_script_resident_memory_bytes`, `…_threads`, `…_open_fds` | gauge | as on the dashboard; absent while not running |
-| `corral_script_last_exit_code` | gauge | absent until a run has finished |
-| `corral_script_last_start_time_seconds`, `…_last_exit_time_seconds`, `…_next_run_time_seconds` | gauge | Unix times |
+| `corral_process_state{state=…}` | gauge | 1 for the current state (`stopped`, `starting`, `running`, `stopping`, `backoff`), 0 for the others |
+| `corral_process_up` | gauge | 1 while the process is running |
+| `corral_process_enabled` | gauge | 0 after Stop, or with `enabled = false` |
+| `corral_process_runs_total` | counter | starts |
+| `corral_process_run_failures_total` | counter | runs that could not start or exited non-zero (requested stops excluded) |
+| `corral_process_log_lines_total{stream=…}` | counter | lines printed on `stdout` / `stderr` |
+| `corral_process_cpu_seconds_total` | counter | CPU time of the process tree |
+| `corral_process_resident_memory_bytes`, `…_threads`, `…_open_fds` | gauge | as on the dashboard; absent while not running |
+| `corral_process_last_exit_code` | gauge | absent until a run has finished |
+| `corral_process_last_start_time_seconds`, `…_last_exit_time_seconds`, `…_next_run_time_seconds` | gauge | Unix times |
 | `corral_build_info{version=…}` | gauge | always 1 |
 
 Counters start at zero when the runner starts. CPU, memory, threads and open
@@ -143,16 +142,16 @@ scrape_configs:
       - targets: ["127.0.0.1:8723"]
 ```
 
-For example, `rate(corral_script_cpu_seconds_total[1m])` is CPU use in
-cores, and `increase(corral_script_run_failures_total[1h]) > 0` finds
+For example, `rate(corral_process_cpu_seconds_total[1m])` is CPU use in
+cores, and `increase(corral_process_run_failures_total[1h]) > 0` finds
 processes that failed in the last hour.
 
-### Metrics from your scripts
+### Metrics from your processes
 
-Scripts can report their own metrics, which appear on the same `/metrics`
-page with `script` and `app` labels added. In Python, use `corral.metrics`, a
-module of this package made for the scripts; it needs only the standard
-library and works like `prometheus_client`:
+Processes can report their own metrics, which appear on the same `/metrics`
+page with `process` and `app` labels added. In Python, use `corral.metrics`, a
+module of this package made for them; it needs only the standard library and
+works like `prometheus_client`:
 
 ```python
 # /// script
@@ -201,9 +200,9 @@ There are `Counter` (`inc`, `count_exceptions`), `Gauge` (`set`, `inc`,
 `dec`, `set_to_current_time`, `time`), `Histogram` and `Summary` (`observe`,
 `time`), each with `.labels(...)`. What differs from `prometheus_client`:
 
-- **The runner holds the values, not the script.** A counter keeps counting
-  across restarts of a script, and a gauge keeps its last value after
-  the script exits. Everything starts again when the runner restarts.
+- **The runner holds the values, not the process.** A counter keeps counting
+  across restarts, and a gauge keeps its last value after the process
+  exits. Everything starts again when the runner restarts.
 - A counter is exposed with `_total` added to its name if it is missing.
 - A `Summary` has `_count` and `_sum` only, no quantiles.
 - Run by hand, outside corral, the calls do nothing (set
@@ -227,12 +226,12 @@ summary). A metric that was not declared gets its type from the first
 operation: `inc` makes a counter, `set` a gauge, `observe` a histogram.
 
 Metric lines are not stored as log lines and do not count towards log
-volume. A line the runner cannot use is reported in the script's log (the
+volume. A line the runner cannot use is reported in the process's log (the
 first ten per run). A line only counts if `@metric` is at its very start, so
 finish any partial line before reporting. Names starting with
-`corral_` and the labels `script` and `app` are reserved, and a script is limited
-to 2000 series. If two scripts use the same name for different types, the
-second one is left out and noted in a comment at the end of `/metrics`.
+`corral_` and the labels `process` and `app` are reserved, and a process is
+limited to 2000 series. If two processes use the same name for different
+types, the second one is left out and noted in a comment at the end of `/metrics`.
 
 ## Dashboards
 

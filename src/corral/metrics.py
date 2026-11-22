@@ -1,6 +1,6 @@
-"""Report metrics from a script run by corral.
+"""Report metrics from a process run by corral.
 
-This module is for the scripts, not for the runner: a script depends on the
+This module is for the processes, not for the runner: a process depends on the
 ``corral`` package and imports ``corral.metrics``. It uses nothing
 else from the package and only the standard library.
 
@@ -11,7 +11,7 @@ call prints one line starting with ``@metric`` on standard output. The runner
 recognises those lines, keeps the values and serves them on its ``/metrics``
 page.
 
-When the script is not started by corral (the CORRAL_METRICS
+When the process is not started by corral (the CORRAL_METRICS
 environment variable is not set) the calls do nothing.
 """
 
@@ -33,7 +33,7 @@ DEFAULT_BUCKETS = (0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 2
 _PREFIX = "@metric "
 _NAME_RE = re.compile(r"^[a-zA-Z_:][a-zA-Z0-9_:]*$")
 _LABEL_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
-_RESERVED_LABELS = ("script", "le", "quantile")
+_RESERVED_LABELS = ("process", "le", "quantile")
 
 _lock = threading.Lock()
 _names: set[str] = set()
@@ -156,7 +156,7 @@ class _Metric:
 
 class Counter(_Metric):
     """A number that only goes up. The runner adds ``_total`` to the name if
-    it is not there, and keeps counting across runs of the script."""
+    it is not there, and keeps counting across runs of the process."""
 
     _type = "counter"
 
@@ -193,7 +193,7 @@ class _ExceptionCounter:
 
 class Gauge(_Metric):
     """A number that can go up and down. The runner keeps the last value
-    after the script has exited."""
+    after the process has exited."""
 
     _type = "gauge"
 

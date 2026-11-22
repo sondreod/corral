@@ -1,7 +1,7 @@
 """SQLite-backed storage for logs, run history and resource samples.
 
-Lines are queued by the threads reading script output and written in batches
-by a single writer thread, so a chatty script costs one transaction per batch
+Lines are queued by the threads reading process output and written in batches
+by a single writer thread, so a chatty process costs one transaction per batch
 instead of one per line. Readers open their own short-lived connections (WAL
 mode lets them read while the writer writes).
 """
@@ -20,30 +20,30 @@ STREAMS = ("stdout", "stderr", "runner")
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS logs (
-    id     INTEGER PRIMARY KEY AUTOINCREMENT,
-    script TEXT NOT NULL,
-    ts     REAL NOT NULL,
-    stream TEXT NOT NULL,
-    line   TEXT NOT NULL
+    id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    process TEXT NOT NULL,
+    ts      REAL NOT NULL,
+    stream  TEXT NOT NULL,
+    line    TEXT NOT NULL
 );
-CREATE INDEX IF NOT EXISTS logs_script_id ON logs (script, id);
+CREATE INDEX IF NOT EXISTS logs_process_id ON logs (process, id);
 
--- One row per start of a script. `ended` is NULL while it runs; `exit_code`
+-- One row per start of a process. `ended` is NULL while it runs; `exit_code`
 -- is NULL if it could not be started; `note` is 'stopped' when the run was
 -- ended on request, or the reason it could not start.
 CREATE TABLE IF NOT EXISTS runs (
-    script    TEXT NOT NULL,
+    process   TEXT NOT NULL,
     started   REAL NOT NULL,
     ended     REAL,
     exit_code INTEGER,
     note      TEXT,
-    PRIMARY KEY (script, started)
+    PRIMARY KEY (process, started)
 );
 
--- Periodic measurements of a script's process tree, plus the number of lines
--- it printed since the previous sample.
+-- Periodic measurements of a process and everything it started, plus the
+-- number of lines it printed since the previous sample.
 CREATE TABLE IF NOT EXISTS samples (
-    script    TEXT NOT NULL,
+    process   TEXT NOT NULL,
     ts        REAL NOT NULL,
     cpu       REAL,     -- percent of one core
     rss       INTEGER,  -- bytes
@@ -52,21 +52,34 @@ CREATE TABLE IF NOT EXISTS samples (
     out_lines INTEGER NOT NULL,
     err_lines INTEGER NOT NULL
 );
-CREATE INDEX IF NOT EXISTS samples_script_ts ON samples (script, ts);
+CREATE INDEX IF NOT EXISTS samples_process_ts ON samples (process, ts);
 
 -- Runs left open by a corral that died: close them at the last moment
--- the script was seen alive.
+-- the process was seen alive.
 UPDATE runs SET
     ended = COALESCE(
-        (SELECT MAX(ts) FROM samples WHERE samples.script = runs.script AND ts >= runs.started),
+        (SELECT MAX(ts) FROM samples WHERE samples.process = runs.process AND ts >= runs.started),
         started),
     note = 'interrupted'
 WHERE ended IS NULL;
 """
 
-_PRUNE_EVERY = 1000  # lines written per script between retention checks
+_PRUNE_EVERY = 1000  # lines written per process between retention checks
 _BATCH_MAX = 5000
 _STOP = object()
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Databases from before the rename have a ``script`` column where
+    there is now ``process``."""
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(logs)")}
+    if "script" not in columns:
+        return
+    with conn:
+        conn.execute("DROP INDEX IF EXISTS logs_script_id")
+        conn.execute("DROP INDEX IF EXISTS samples_script_ts")
+        for table in ("logs", "runs", "samples"):
+            conn.execute(f"ALTER TABLE {table} RENAME COLUMN script TO process")
 
 
 class _Sql(tuple):
@@ -74,13 +87,14 @@ class _Sql(tuple):
 
 
 class LogStore:
-    def __init__(self, path: str | Path, max_lines_per_script: int = 100_000):
+    def __init__(self, path: str | Path, max_lines_per_process: int = 100_000):
         self.path = str(path)
-        self.max_lines = max_lines_per_script
+        self.max_lines = max_lines_per_process
         self._queue: queue.Queue = queue.Queue()
         self._since_prune: Counter[str] = Counter()
         with closing(self._connect()) as conn:
             conn.execute("PRAGMA journal_mode=WAL")
+            _migrate(conn)
             conn.executescript(_SCHEMA)
         self._writer = threading.Thread(target=self._write_loop, name="log-writer", daemon=True)
         self._writer.start()
@@ -92,27 +106,27 @@ class LogStore:
 
     # -- writing ---------------------------------------------------------
 
-    def append(self, script: str, stream: str, line: str, ts: float | None = None) -> None:
-        self._queue.put((script, time.time() if ts is None else ts, stream, line))
+    def append(self, process: str, stream: str, line: str, ts: float | None = None) -> None:
+        self._queue.put((process, time.time() if ts is None else ts, stream, line))
 
-    def run_started(self, script: str, started: float) -> None:
-        self._queue.put(_Sql(("INSERT OR REPLACE INTO runs (script, started) VALUES (?, ?)", (script, started))))
+    def run_started(self, process: str, started: float) -> None:
+        self._queue.put(_Sql(("INSERT OR REPLACE INTO runs (process, started) VALUES (?, ?)", (process, started))))
 
     def run_finished(
-        self, script: str, started: float, ended: float, exit_code: int | None, note: str | None
+        self, process: str, started: float, ended: float, exit_code: int | None, note: str | None
     ) -> None:
         self._queue.put(
             _Sql(
                 (
-                    "UPDATE runs SET ended = ?, exit_code = ?, note = ? WHERE script = ? AND started = ?",
-                    (ended, exit_code, note, script, started),
+                    "UPDATE runs SET ended = ?, exit_code = ?, note = ? WHERE process = ? AND started = ?",
+                    (ended, exit_code, note, process, started),
                 )
             )
         )
 
     def add_sample(
         self,
-        script: str,
+        process: str,
         ts: float,
         *,
         cpu: float | None = None,
@@ -125,9 +139,9 @@ class LogStore:
         self._queue.put(
             _Sql(
                 (
-                    "INSERT INTO samples (script, ts, cpu, rss, threads, fds, out_lines, err_lines)"
+                    "INSERT INTO samples (process, ts, cpu, rss, threads, fds, out_lines, err_lines)"
                     " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                    (script, ts, cpu, rss, threads, fds, out_lines, err_lines),
+                    (process, ts, cpu, rss, threads, fds, out_lines, err_lines),
                 )
             )
         )
@@ -164,16 +178,16 @@ class LogStore:
             try:
                 with conn:
                     conn.executemany(
-                        "INSERT INTO logs (script, ts, stream, line) VALUES (?, ?, ?, ?)", rows
+                        "INSERT INTO logs (process, ts, stream, line) VALUES (?, ?, ?, ?)", rows
                     )
                     for item in items:
                         if isinstance(item, _Sql):
                             conn.execute(*item)
                     self._since_prune.update(r[0] for r in rows)
-                    for script, count in list(self._since_prune.items()):
+                    for process, count in list(self._since_prune.items()):
                         if count >= _PRUNE_EVERY:
-                            self._prune(conn, script)
-                            del self._since_prune[script]
+                            self._prune(conn, process)
+                            del self._since_prune[process]
             except sqlite3.Error as exc:  # keep running; losing a batch beats dying
                 print(f"corral: log write failed: {exc}", flush=True)
             for item in items:
@@ -181,18 +195,18 @@ class LogStore:
                     item.set()
         conn.close()
 
-    def _prune(self, conn: sqlite3.Connection, script: str) -> None:
+    def _prune(self, conn: sqlite3.Connection, process: str) -> None:
         conn.execute(
-            "DELETE FROM logs WHERE script = ?1 AND id <= ("
-            " SELECT id FROM logs WHERE script = ?1 ORDER BY id DESC LIMIT 1 OFFSET ?2)",
-            (script, self.max_lines),
+            "DELETE FROM logs WHERE process = ?1 AND id <= ("
+            " SELECT id FROM logs WHERE process = ?1 ORDER BY id DESC LIMIT 1 OFFSET ?2)",
+            (process, self.max_lines),
         )
 
     # -- reading ---------------------------------------------------------
 
     def query(
         self,
-        script: str,
+        process: str,
         *,
         text: str = "",
         streams: tuple[str, ...] | None = None,
@@ -206,8 +220,8 @@ class LogStore:
         (for following a log); otherwise the *last* ``limit`` lines, optionally
         only those older than ``before_id`` (for paging backwards).
         """
-        where = ["script = ?"]
-        params: list = [script]
+        where = ["process = ?"]
+        params: list = [process]
         if text:
             escaped = text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
             where.append("line LIKE ? ESCAPE '\\'")
@@ -233,40 +247,40 @@ class LogStore:
             rows.reverse()
         return [{"id": r[0], "ts": r[1], "stream": r[2], "line": r[3]} for r in rows]
 
-    def metrics(self, script: str, since: float, bucket: float) -> list[dict]:
+    def metrics(self, process: str, since: float, bucket: float) -> list[dict]:
         """Samples from ``since`` on, aggregated into ``bucket``-second steps.
 
-        Steps without samples (the script was not running and printed nothing)
+        Steps without samples (the process was not running and printed nothing)
         are absent.
         """
         sql = (
             "SELECT CAST(ts / ?1 AS INTEGER) * ?1 AS t, AVG(cpu), MAX(cpu), AVG(rss), MAX(rss),"
             " MAX(threads), MAX(fds), SUM(out_lines), SUM(err_lines)"
-            " FROM samples WHERE script = ?2 AND ts >= ?3 GROUP BY t ORDER BY t"
+            " FROM samples WHERE process = ?2 AND ts >= ?3 GROUP BY t ORDER BY t"
         )
         with closing(self._connect()) as conn:
-            rows = conn.execute(sql, (bucket, script, since)).fetchall()
+            rows = conn.execute(sql, (bucket, process, since)).fetchall()
         keys = ("t", "cpu", "cpu_max", "rss", "rss_max", "threads", "fds", "out_lines", "err_lines")
         return [dict(zip(keys, row)) for row in rows]
 
-    def runs(self, script: str, limit: int = 50) -> list[dict]:
+    def runs(self, process: str, limit: int = 50) -> list[dict]:
         """The most recent runs, newest first."""
         with closing(self._connect()) as conn:
             rows = conn.execute(
-                "SELECT started, ended, exit_code, note FROM runs WHERE script = ?"
+                "SELECT started, ended, exit_code, note FROM runs WHERE process = ?"
                 " ORDER BY started DESC LIMIT ?",
-                (script, limit),
+                (process, limit),
             ).fetchall()
         return [dict(zip(("started", "ended", "exit_code", "note"), row)) for row in rows]
 
-    def run_summary(self, script: str, since: float) -> dict:
+    def run_summary(self, process: str, since: float) -> dict:
         """How many runs started since ``since``, and how many of them failed
         (could not start, or exited non-zero without being asked to stop)."""
         with closing(self._connect()) as conn:
             total, failed = conn.execute(
                 "SELECT COUNT(*), COALESCE(SUM(ended IS NOT NULL AND COALESCE(note, '') NOT IN"
                 " ('stopped', 'interrupted') AND COALESCE(exit_code, -1) != 0), 0)"
-                " FROM runs WHERE script = ? AND started >= ?",
-                (script, since),
+                " FROM runs WHERE process = ? AND started >= ?",
+                (process, since),
             ).fetchone()
         return {"total": total, "failed": failed}
