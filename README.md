@@ -280,6 +280,8 @@ in `data_dir`, for 30 days. The **Dashboards** page shows them as graphs:
   a small chart when it is one series), a **bar chart** or a **table** (the
   latest value per series, or their average, maximum or minimum), or a
   **heatmap** (how a histogram's observations spread over its buckets).
+- A **clock** panel shows the time (hh:mm) of the computer showing the
+  dashboard, sized to fill the panel.
 - Filter on label values, and pick a function: the **value** as stored, a
   **rate** per second or per minute or the **increase** per step (for
   counters; a counter that drops is taken to have restarted from zero), or a

@@ -54,7 +54,7 @@ CREATE TABLE IF NOT EXISTS dashboards (
 
 FUNCTIONS = ("raw", "rate", "per_minute", "increase", "quantile", "heatmap")
 AGGREGATIONS = ("none", "sum", "avg", "min", "max", "count")
-PANEL_TYPES = ("line", "stat", "bar", "table", "heatmap")
+PANEL_TYPES = ("line", "stat", "bar", "table", "heatmap", "clock")  # a clock has no query
 GRID_COLUMNS = 12
 MAX_SERIES = 1000  # series one query may read
 MAX_POINTS = 1500

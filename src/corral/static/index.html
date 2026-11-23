@@ -248,6 +248,10 @@
   .bars .track { height: 14px; }
   .bars .bar { height: 100%; background: var(--c1); border-radius: 0 4px 4px 0; min-width: 2px; }
   .gbody .tablewrap { overflow: auto; }
+  /* the clock's digits grow with the panel: as tall as fits, never wider */
+  .gbody .clockwrap { flex: 1; min-height: 0; container-type: size; display: flex; align-items: center;
+                      justify-content: center; }
+  .clock { font-size: min(70cqh, 36cqw); line-height: 1; font-weight: 600; font-variant-numeric: tabular-nums; }
   .heat rect.cell:hover { stroke: var(--text); stroke-width: 1; }
 
   dialog#editor { background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 10px;
@@ -377,14 +381,14 @@
           <select id="ed-type">
             <option value="line">Line chart</option><option value="stat">Stat</option>
             <option value="bar">Bar chart</option><option value="table">Table</option>
-            <option value="heatmap">Heatmap</option>
+            <option value="heatmap">Heatmap</option><option value="clock">Clock</option>
           </select></label>
-        <label class="row"><span>Metric</span>
+        <label class="row data" id="row-metric"><span>Metric</span>
           <input id="ed-metric" list="ed-metrics" autocomplete="off" spellcheck="false" placeholder="Start typing a metric name">
           <datalist id="ed-metrics"></datalist></label>
-        <div class="info" id="ed-info"></div>
+        <div class="info data" id="ed-info"></div>
         <div class="row" id="row-filters"><span>Filter</span><div class="filters" id="ed-filters"></div></div>
-        <div class="pair">
+        <div class="pair data">
           <label class="row"><span>Function</span><select id="ed-fn"></select></label>
           <label class="row" id="row-q"><span>Quantile (0–1)</span><input id="ed-q" type="number" min="0" max="1" step="0.01"></label>
         </div>
@@ -394,7 +398,7 @@
             <option value="max">Maximum</option><option value="min">Minimum</option><option value="count">Count</option>
           </select></label>
         <div class="row" id="row-by"><span>Keep separate by</span><div class="checks" id="ed-by"></div></div>
-        <div class="pair">
+        <div class="pair data">
           <label class="row"><span>Unit</span>
             <select id="ed-unit">
               <option value="none">Number</option><option value="percent">Percent</option>
@@ -1058,6 +1062,11 @@ function legendNode(names) {
 
 function renderPanelBody(body, panel, data, error) {
   const q = panel.query || {};
+  if (panel.type === "clock") {
+    const wrap = el("div", "clockwrap");
+    wrap.append(el("div", "clock", clockNow()));
+    return body.replaceChildren(wrap);
+  }
   if (error) return message(body, error, true);
   if (!q.metric) return message(body, "Choose a metric for this panel.");
   if (!data) return message(body, "Loading…");
@@ -1137,6 +1146,16 @@ function renderPanelBody(body, panel, data, error) {
     drawHeatmap(box, data, fmt, body.clientHeight);
   }
 }
+// The computer's local time, hh:mm; every clock panel is updated each second.
+function clockNow() {
+  const d = new Date();
+  return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+}
+setInterval(() => {
+  const now = clockNow();
+  for (const c of document.querySelectorAll(".clock")) if (c.textContent !== now) c.textContent = now;
+}, 1000);
+
 const REDUCE_NAMES = { last: "Latest", avg: "Average", max: "Maximum", min: "Minimum" };
 
 // Histogram buckets over time: one row per bucket, darker for more observations.
@@ -1228,7 +1247,8 @@ async function loadPanel(view) {
 }
 
 function renderPanel(view) {
-  view.title.textContent = view.panel.title || (view.panel.query && view.panel.query.metric) || "Untitled";
+  view.title.textContent = view.panel.title
+    || (view.panel.type === "clock" ? "" : (view.panel.query && view.panel.query.metric) || "Untitled");
   renderPanelBody(view.body, view.panel, view.data, view.error);
 }
 
@@ -1647,6 +1667,9 @@ function syncEditor() {
     by: $("row-by").hidden ? [] : [...$("ed-by").querySelectorAll("input:checked")].map((c) => c.value),
     q: Number.isFinite(q) ? clamp(q, 0, 1) : 0.95,
   };
+  // A clock shows no metric: hide everything about one, and save no query.
+  for (const node of document.querySelectorAll("#edform .data")) node.hidden = type === "clock";
+  if (type === "clock") for (const id of ["row-filters", "row-agg", "row-by"]) $(id).hidden = true;
   const problem = type === "heatmap" && metric && kind !== "bucket"
     ? "A heatmap needs a histogram's _bucket metric." : null;
   $("ed-save").disabled = !!problem;
@@ -1659,7 +1682,7 @@ async function previewPanel(problem) {
   view.panel = editing.panel;
   view.data = null;
   view.error = problem;
-  if (problem || !view.panel.query.metric) return renderPanel(view);
+  if (problem || view.panel.type === "clock" || !view.panel.query.metric) return renderPanel(view);
   const mine = ++view.seq;
   renderPanel(view);
   try {
@@ -1683,6 +1706,7 @@ $("editor").addEventListener("close", () => {
   syncEditor();
   clearTimeout(previewTimer);
   const p = editing.panel;
+  if (p.type === "clock") delete p.query;
   if (editing.isNew) dash.spec.panels = repack([...dash.spec.panels, p], p);
   else dash.spec.panels = dash.spec.panels.map((x) => x.id === p.id ? p : x);
   const old = panelViews.get(p.id);

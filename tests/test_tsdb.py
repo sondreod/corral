@@ -155,6 +155,9 @@ def test_dashboards(db):
     assert db.dashboards() == [{"id": d["id"], "name": "Ops", "panels": 1, "updated": d["updated"]}]
     db.update_dashboard(d["id"], {"name": "Ops 2", "spec": {"range": 600, "panels": []}})
     assert db.dashboard(d["id"])["spec"] == {"range": 600, "panels": []}
+    clock = {"id": "c", "type": "clock", "x": 0, "y": 0, "w": 3, "h": 4}  # no query
+    db.update_dashboard(d["id"], {"name": "Ops 2", "spec": {"range": 600, "panels": [clock]}})
+    assert db.dashboard(d["id"])["spec"]["panels"] == [clock]
     for bad in (
         {"name": ""},
         {"name": "x", "spec": []},
