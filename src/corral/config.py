@@ -65,6 +65,22 @@ class AppConfig:
     procfile: Path
 
 
+LABEL_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+LOKI_LABELS = ("app", "process", "stream")  # set by corral on every line
+
+
+@dataclass(frozen=True)
+class LokiConfig:
+    """Where to push log lines: Loki, or anything taking its push API
+    (VictoriaLogs, Grafana Cloud)."""
+
+    url: str  # the full push URL, e.g. http://loki:3100/loki/api/v1/push
+    labels: dict[str, str] = field(default_factory=dict)  # added to every line
+    headers: dict[str, str] = field(default_factory=dict)  # e.g. Authorization
+    batch_wait: float = 1.0  # seconds lines may wait to be sent with others
+    max_buffer: int = 10_000  # lines held while the server is unreachable
+
+
 @dataclass(frozen=True)
 class Config:
     host: str = "127.0.0.1"
@@ -79,6 +95,7 @@ class Config:
     # stored metrics: how often /metrics is scraped, and how long samples are kept
     scrape_interval: float = 60.0
     metrics_retention: float = 30 * 86400.0
+    loki: LokiConfig | None = None
     apps: tuple[AppConfig, ...] = ()
     processes: tuple[ProcessConfig, ...] = ()  # every process of every app
 
@@ -141,6 +158,38 @@ def _no_schedule(table: dict) -> None:
             "'every' and 'cron' are no longer supported: every process runs as a service;"
             " run scheduled jobs from cron or a systemd timer instead"
         )
+
+
+def _strings(table: dict, key: str) -> dict[str, str]:
+    value = _take(table, key, dict, {})
+    if not all(isinstance(v, str) for v in value.values()):
+        raise ConfigError(f"{key!r} values must be strings")
+    return value
+
+
+def _loki(table: dict) -> LokiConfig:
+    url = _take(table, "url", str, "")
+    if not url.startswith(("http://", "https://")):
+        raise ConfigError(
+            "'url' is required: the push URL, such as http://localhost:3100/loki/api/v1/push"
+            " (Loki) or http://localhost:9428/insert/loki/api/v1/push (VictoriaLogs)"
+        )
+    labels = _strings(table, "labels")
+    for name in labels:
+        if not LABEL_RE.match(name):
+            raise ConfigError(f"label name {name!r} may only contain letters, digits and '_'")
+        if name in LOKI_LABELS:
+            raise ConfigError(f"label {name!r} is set by corral")
+    headers = _strings(table, "headers")
+    try:
+        batch_wait = parse_duration(table.pop("batch_wait", "1s"))
+    except ValueError as exc:
+        raise ConfigError(f"'batch_wait': {exc}") from None
+    max_buffer = _take(table, "max_buffer", int, 10_000)
+    if max_buffer < 1:
+        raise ConfigError("'max_buffer' must be positive")
+    _no_leftovers(table, "[loki]")
+    return LokiConfig(url, labels, headers, batch_wait, max_buffer)
 
 
 def _app(name: str, table: dict, base: Path, path: tuple[str, ...]) -> tuple[AppConfig, list[ProcessConfig]]:
@@ -218,6 +267,10 @@ def load_config(path: str | Path) -> Config:
         server = _table(raw, "server")
         runner = _table(raw, "runner")
         metrics = _table(raw, "metrics")
+        try:
+            loki = _loki(_table(raw, "loki")) if "loki" in raw else None
+        except ConfigError as exc:
+            raise ConfigError(f"[loki]: {exc}") from None
         apps_raw = _table(raw, "apps", "[apps.<name>]")
         _no_leftovers(raw, "top level")
 
@@ -295,6 +348,7 @@ def load_config(path: str | Path) -> Config:
         history_days=history_days,
         scrape_interval=scrape_interval,
         metrics_retention=metrics_retention,
+        loki=loki,
         apps=tuple(apps),
         processes=tuple(processes),
     )

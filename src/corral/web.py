@@ -32,6 +32,7 @@ from .monitor import Monitor
 from .store import STREAMS, LogStore
 from .supervisor import Supervisor
 from .config import ConfigError
+from .loki import LokiPusher
 from .tsdb import MetricDB, NotFound, QueryError
 
 ACTIONS = ("start", "stop", "restart")
@@ -112,6 +113,7 @@ class Handler(BaseHTTPRequestHandler):
     monitor: Monitor | None
     tsdb: MetricDB | None = None
     reload: Callable[[], dict] | None = None
+    loki: LokiPusher | None = None
     host_ok: Callable[[str], bool] | None = None
 
     def log_message(self, format, *args):  # keep the journal quiet
@@ -149,7 +151,7 @@ class Handler(BaseHTTPRequestHandler):
                 page = resources.files("corral").joinpath("static/index.html").read_bytes()
                 self._send(HTTPStatus.OK, page, "text/html; charset=utf-8")
             elif method == "GET" and parts == ["metrics"]:
-                text = prometheus.render(self.supervisor, self.monitor)
+                text = prometheus.render(self.supervisor, self.monitor, self.loki)
                 self._send(HTTPStatus.OK, text.encode(), prometheus.CONTENT_TYPE)
             elif method == "POST" and parts == ["api", "reload"]:
                 if self.reload is None:
@@ -308,13 +310,14 @@ def make_server(
     allowed_hosts=(),
     tsdb: MetricDB | None = None,
     reload: Callable[[], dict] | None = None,
+    loki: LokiPusher | None = None,
 ) -> ThreadingHTTPServer:
     check = host_filter(host, allowed_hosts)
     handler = type(
         "BoundHandler",
         (Handler,),
         # staticmethod, or the function would be bound to the handler instance
-        {"supervisor": supervisor, "store": store, "monitor": monitor, "tsdb": tsdb,
+        {"supervisor": supervisor, "store": store, "monitor": monitor, "tsdb": tsdb, "loki": loki,
          "host_ok": staticmethod(check) if check else None,
          "reload": staticmethod(reload) if reload else None},
     )

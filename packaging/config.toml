@@ -37,6 +37,18 @@ scrape_interval = "1m"
 # scrape: 30 days at one a minute is under 1 MB per series.
 retention = "30d"
 
+# Also push every log line to Grafana Loki, or anything that takes its push
+# API (VictoriaLogs, Grafana Cloud), labelled app, process and stream. Lines
+# are still kept in SQLite. Needs a restart to change.
+#
+# [loki]
+# url = "http://localhost:9428/insert/loki/api/v1/push"  # VictoriaLogs
+# url = "http://localhost:3100/loki/api/v1/push"         # Loki
+# labels = { host = "web1" }   # added to every line
+# headers = { Authorization = "Bearer ..." }
+# batch_wait = "1s"            # how long lines wait to be sent together
+# max_buffer = 10000           # lines kept while the server is unreachable
+
 # One table per app: a folder with a Procfile, one process per line:
 #
 #     web: uv run --script app.py --port 8000

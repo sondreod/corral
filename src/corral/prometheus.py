@@ -13,6 +13,7 @@ from __future__ import annotations
 import math
 
 from . import __version__
+from .loki import LokiPusher
 from .monitor import Monitor
 from .supervisor import Supervisor
 
@@ -58,7 +59,7 @@ class _Family:
         ]
 
 
-def render(supervisor: Supervisor, monitor: Monitor | None = None) -> str:
+def render(supervisor: Supervisor, monitor: Monitor | None = None, loki: LokiPusher | None = None) -> str:
     families: list[_Family] = []
 
     def family(name: str, kind: str, help: str) -> _Family:
@@ -112,6 +113,20 @@ def render(supervisor: Supervisor, monitor: Monitor | None = None) -> str:
             memory.add(usage.get("rss"), **ids)
             threads.add(usage.get("threads"), **ids)
             fds.add(usage.get("fds"), **ids)
+
+    if loki is not None:
+        family("loki_lines_sent_total", "counter", "Log lines accepted by Loki.").add(loki.sent)
+        dropped = family(
+            "loki_lines_dropped_total",
+            "counter",
+            "Log lines not sent to Loki: the buffer was full, or Loki refused them.",
+        )
+        for reason in ("buffer_full", "rejected"):
+            dropped.add(loki.dropped[reason], reason=reason)
+        family("loki_push_failures_total", "counter", "Pushes to Loki that failed and were retried.").add(
+            loki.failures
+        )
+        family("loki_buffered_lines", "gauge", "Log lines waiting to be sent to Loki.").add(loki.buffered())
 
     lines_out = [line for f in families for line in f.lines()]
     lines_out += _custom(supervisor, {f.name for f in families})

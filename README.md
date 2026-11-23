@@ -88,6 +88,36 @@ their stream: `stdout`, `stderr`, or `runner` for corral's own notes
 (started, exited with code N, ...). The newest `max_log_lines` per process are
 kept. The web page filters by substring (case-insensitive) and by stream.
 
+### Sending logs to Loki or VictoriaLogs
+
+corral can also push every line to [Grafana Loki](https://grafana.com/oss/loki/),
+or to anything that takes Loki's push API, such as
+[VictoriaLogs](https://docs.victoriametrics.com/victorialogs/) or Grafana
+Cloud. Lines carry the same labels as the metrics, `app` and `process`, plus
+`stream`:
+
+```toml
+[loki]
+url = "http://localhost:9428/insert/loki/api/v1/push"  # VictoriaLogs
+# url = "http://localhost:3100/loki/api/v1/push"       # Loki
+labels = { host = "web1" }      # added to every line
+headers = { Authorization = "Bearer ..." }  # e.g. auth, or X-Scope-OrgID
+batch_wait = "1s"               # lines wait up to this long to go out together
+max_buffer = 10000              # lines kept while the server is unreachable
+```
+
+Lines are sent in batches of up to 1000, gzipped. When the server can't be
+reached, or answers 429 or 5xx, corral keeps the lines and tries again, waiting
+1 second, then 2, 4, ... up to a minute. Past `max_buffer` lines it drops the
+oldest. Lines the server refuses with another 4xx (for example, too old) are
+dropped and the reason is printed. On shutdown corral tries for up to 5 seconds
+to send what is left. Every line is still stored in SQLite, so the web
+interface has it either way.
+
+The query `{process="shop.web", stream="stderr"}` selects a process's errors,
+in Loki's LogQL as well as VictoriaLogs' LogsQL. Changing `[loki]` needs a
+restart.
+
 ## Monitoring
 
 The start page shows the processes grouped by app, one card each with its
@@ -129,6 +159,10 @@ and its app (`app="shop"`):
 | `corral_process_last_exit_code` | gauge | absent until a run has finished |
 | `corral_process_last_start_time_seconds`, `…_last_exit_time_seconds`, `…_next_run_time_seconds` | gauge | Unix times |
 | `corral_build_info{version=…}` | gauge | always 1 |
+| `corral_loki_lines_sent_total` | counter | lines accepted by Loki (only with `[loki]`, as are the next three) |
+| `corral_loki_lines_dropped_total{reason=…}` | counter | lines not sent: `buffer_full` or `rejected` |
+| `corral_loki_push_failures_total` | counter | pushes that failed and were retried |
+| `corral_loki_buffered_lines` | gauge | lines waiting to be sent |
 
 Counters start at zero when the runner starts. CPU, memory, threads and open
 files come from the most recent sample, so they lag by up to

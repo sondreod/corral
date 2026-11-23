@@ -84,3 +84,19 @@ def test_requested_stop_is_not_a_failure(tmp_path, harness):  # noqa: F811
     assert value(m, "process_run_failures_total", process="svc") == 0
     assert value(m, "process_enabled", process="svc") == 0
     assert value(m, "process_cpu_seconds_total", process="svc") is None  # no monitor
+
+
+def test_loki_counters(tmp_path, harness):  # noqa: F811
+    from collections import Counter
+    from types import SimpleNamespace
+
+    supervisor, _ = harness()
+    m = parse(prometheus.render(supervisor))
+    assert value(m, "loki_lines_sent_total") is None  # no [loki]: no loki metrics
+    loki = SimpleNamespace(sent=7, dropped=Counter(buffer_full=2), failures=1, buffered=lambda: 3)
+    m = parse(prometheus.render(supervisor, loki=loki))
+    assert value(m, "loki_lines_sent_total") == 7
+    assert value(m, "loki_lines_dropped_total", reason="buffer_full") == 2
+    assert value(m, "loki_lines_dropped_total", reason="rejected") == 0
+    assert value(m, "loki_push_failures_total") == 1
+    assert value(m, "loki_buffered_lines") == 3

@@ -13,6 +13,7 @@ import sqlite3
 import threading
 import time
 from collections import Counter
+from collections.abc import Callable
 from contextlib import closing
 from pathlib import Path
 
@@ -92,6 +93,8 @@ class LogStore:
         self.max_lines = max_lines_per_process
         self._queue: queue.Queue = queue.Queue()
         self._since_prune: Counter[str] = Counter()
+        # Also called with every line (process, stream, line, ts), e.g. to send it to Loki.
+        self.forward: Callable[[str, str, str, float], None] | None = None
         with closing(self._connect()) as conn:
             conn.execute("PRAGMA journal_mode=WAL")
             _migrate(conn)
@@ -107,7 +110,10 @@ class LogStore:
     # -- writing ---------------------------------------------------------
 
     def append(self, process: str, stream: str, line: str, ts: float | None = None) -> None:
-        self._queue.put((process, time.time() if ts is None else ts, stream, line))
+        ts = time.time() if ts is None else ts
+        self._queue.put((process, ts, stream, line))
+        if self.forward is not None:
+            self.forward(process, stream, line, ts)
 
     def run_started(self, process: str, started: float) -> None:
         self._queue.put(_Sql(("INSERT OR REPLACE INTO runs (process, started) VALUES (?, ?)", (process, started))))

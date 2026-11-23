@@ -8,6 +8,7 @@ import threading
 
 from . import __version__
 from .config import ConfigError, load_config
+from .loki import LokiPusher
 from .monitor import Monitor
 from .store import LogStore
 from .supervisor import Supervisor
@@ -18,7 +19,7 @@ DEFAULT_CONFIG = "/etc/corral/config.toml"
 # Settings only read at startup; a reload that changes them says so.
 _STARTUP_SETTINGS = (
     "host", "port", "allowed_hosts", "data_dir", "max_log_lines", "sample_interval",
-    "history_days", "scrape_interval", "metrics_retention",
+    "history_days", "scrape_interval", "metrics_retention", "loki",
 )
 
 
@@ -54,6 +55,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"corral: cannot open the metrics database in {config.data_dir}: {exc}", file=sys.stderr)
         store.close()
         return 1
+    loki = LokiPusher(config.loki) if config.loki else None
+    if loki:
+        store.forward = loki.push
+        loki.start()
     supervisor = Supervisor(config, store)
     reload_lock = threading.Lock()
 
@@ -74,10 +79,12 @@ def main(argv: list[str] | None = None) -> int:
     monitor = Monitor(supervisor, store, config.sample_interval, config.history_days)
     try:
         server = make_server(
-            config.host, config.port, supervisor, store, monitor, config.allowed_hosts, metric_db, reload
+            config.host, config.port, supervisor, store, monitor, config.allowed_hosts, metric_db, reload, loki
         )
     except OSError as exc:
         print(f"corral: cannot listen on {config.host} port {config.port}: {exc}", file=sys.stderr)
+        if loki:
+            loki.stop(0)
         store.close()
         return 1
 
@@ -95,7 +102,8 @@ def main(argv: list[str] | None = None) -> int:
     host = f"[{config.host}]" if ":" in config.host else config.host
     print(
         f"corral {__version__}: {len(config.apps)} app(s), {len(config.processes)} process(es), "
-        f"web interface on http://{host}:{server.server_address[1]}/",
+        f"web interface on http://{host}:{server.server_address[1]}/"
+        + (f", sending logs to {config.loki.url}" if config.loki else ""),
         flush=True,
     )
 
@@ -112,6 +120,8 @@ def main(argv: list[str] | None = None) -> int:
     supervisor.shutdown()
     server.shutdown()
     store.close()
+    if loki:
+        loki.stop()
     return 0
 
 

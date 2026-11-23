@@ -1,6 +1,6 @@
 import pytest
 
-from corral.config import ConfigError, load_config, parse_duration
+from corral.config import ConfigError, LokiConfig, load_config, parse_duration
 
 
 def write(tmp_path, text):
@@ -138,6 +138,14 @@ def test_procfile_problems(tmp_path):
         ("[runner]\nsample_interval = nan", "'sample_interval'.*finite"),
         ('[metrics]\nscrape_interval = "0.5s"', "at least one second"),
         ('[metrics]\nscrape_interval = "1h"\nretention = "10m"', "'retention' must not be shorter"),
+        ("[loki]\n", r"\[loki\]: 'url' is required"),
+        ('[loki]\nurl = "loki:3100"', "'url' is required: the push URL"),
+        ('[loki]\nurl = "http://l/"\nlabels = { app = "x" }', "label 'app' is set by corral"),
+        ('[loki]\nurl = "http://l/"\nlabels = { "a-b" = "x" }', "label name 'a-b' may only"),
+        ('[loki]\nurl = "http://l/"\nlabels = { host = 1 }', "'labels' values must be strings"),
+        ('[loki]\nurl = "http://l/"\nmax_buffer = 0', "'max_buffer' must be positive"),
+        ('[loki]\nurl = "http://l/"\nbatch_wait = "now"', "'batch_wait'"),
+        ('[loki]\nurl = "http://l/"\ntypo = 1', r"\[loki\]: unknown key\(s\) in \[loki\]: typo"),
         ("not toml", "config.toml"),
     ],
 )
@@ -145,6 +153,28 @@ def test_invalid_config(tmp_path, text, message):
     app_dir(tmp_path, procfile="web: ./web\n")
     with pytest.raises(ConfigError, match=message):
         load_config(write(tmp_path, text))
+
+
+def test_loki(tmp_path):
+    assert load_config(write(tmp_path, "")).loki is None
+    cfg = load_config(
+        write(
+            tmp_path,
+            """
+            [loki]
+            url = "http://localhost:9428/insert/loki/api/v1/push"
+            labels = { host = "web1" }
+            headers = { Authorization = "Bearer x" }
+            batch_wait = "2s"
+            max_buffer = 500
+            """,
+        )
+    )
+    assert cfg.loki == LokiConfig(
+        "http://localhost:9428/insert/loki/api/v1/push", {"host": "web1"}, {"Authorization": "Bearer x"}, 2.0, 500
+    )
+    cfg = load_config(write(tmp_path, '[loki]\nurl = "https://logs.example.com/loki/api/v1/push"\n'))
+    assert (cfg.loki.labels, cfg.loki.batch_wait, cfg.loki.max_buffer) == ({}, 1.0, 10_000)
 
 
 def test_missing_file(tmp_path):
