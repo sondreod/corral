@@ -33,7 +33,7 @@ DEFAULT_BUCKETS = (0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 2
 _PREFIX = "@metric "
 _NAME_RE = re.compile(r"^[a-zA-Z_:][a-zA-Z0-9_:]*$")
 _LABEL_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
-_RESERVED_LABELS = ("process", "le", "quantile")
+_RESERVED_LABELS = ("process", "app", "le", "quantile")  # as in corral.custom
 
 _lock = threading.Lock()
 _names: set[str] = set()

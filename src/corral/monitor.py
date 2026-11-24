@@ -99,7 +99,7 @@ class Monitor:
         self._supervisor = supervisor
         self._store = store
         self.interval = interval
-        self._retention = retention_days * 86400
+        self.retention = retention_days * 86400  # seconds of history kept
         self._stop = threading.Event()
         self._lock = threading.Lock()
         self._latest: dict[str, dict] = {}
@@ -133,7 +133,7 @@ class Monitor:
             try:
                 self.sample()
                 if time.monotonic() >= next_prune:
-                    self._store.prune_history(time.time() - self._retention)
+                    self._store.prune_history(time.time() - self.retention)
                     next_prune = time.monotonic() + _PRUNE_INTERVAL
             except Exception as exc:  # keep measuring whatever happens
                 print(f"corral: monitoring failed: {exc!r}", flush=True)

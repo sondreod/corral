@@ -494,7 +494,13 @@ function fmtBytes(v) {
   const mb = v / 1048576;
   return mb >= 1024 ? trim(mb / 1024, 2) + " GB" : trim(mb, mb < 10 ? 1 : 0) + " MB";
 }
-const rangeLabel = (seconds) => (RANGES.find((r) => r[1] === seconds) || ["range"])[0];
+function rangeLabel(seconds) {
+  const known = RANGES.find((r) => r[1] === seconds);
+  if (known) return known[0];
+  if (seconds >= 86400 && seconds % 86400 === 0) return `${seconds / 86400} d`;
+  if (seconds >= 3600) return `${Math.round(seconds / 3600)} h`;
+  return `${Math.round(seconds / 60)} min`;
+}
 
 // ---- process status -----------------------------------------------------
 
@@ -569,7 +575,7 @@ function fillHistoryTiles(t, data, label) {
 
 function buildCard(s) {
   const card = el("div", "card");
-  card.onclick = () => { location.hash = `#/s/${encodeURIComponent(s.name)}/monitor`; };
+  card.onclick = () => { location.hash = `#/p/${encodeURIComponent(s.name)}/monitor`; };
   const top = el("div", "top");
   const state = el("span", "state");
   const name = el("span", "name", s.process || s.name);
@@ -798,13 +804,24 @@ const COLORS = ["var(--series-1)", "var(--series-2)"];
 const monitorTiles = {};
 const chartBoxes = [];
 
-function buildMonitor() {
-  for (const [label, seconds] of RANGES) {
+// The Monitoring tab's ranges go up to the history corral keeps (history_days).
+let monitorHistory = null;
+function buildMonitorRanges(history) {
+  if (!history || history === monitorHistory) return;
+  monitorHistory = history;
+  const ranges = [...RANGES.filter((r) => r[1] < history), [rangeLabel(history), history]];
+  if (monitorRange > history) monitorRange = ranges[0][1];
+  $("ranges").replaceChildren(...ranges.map(([label, seconds]) => {
     const b = el("button", "", label);
     b.dataset.range = seconds;
+    b.classList.toggle("active", seconds === monitorRange);
     b.onclick = () => { monitorRange = seconds; loadMonitor(); };
-    $("ranges").append(b);
-  }
+    return b;
+  }));
+}
+
+function buildMonitor() {
+  buildMonitorRanges(7 * 86400);  // until the first answer from corral says otherwise
   Object.assign(monitorTiles, {
     cpu: tile("CPU"), mem: tile("Memory"), threads: tile("Threads"), fds: tile("Open files"),
     runs: tile("Runs"), lines: tile("Log lines"),
@@ -1817,7 +1834,7 @@ $("reload").onclick = async () => {
 
 // ---- routing and refresh -----------------------------------------------
 
-// "#/" is the overview; "#/s/<name>/logs" and "#/s/<name>/monitor" are a process's tabs;
+// "#/" is the overview; "#/p/<name>/logs" and "#/p/<name>/monitor" are a process's tabs;
 // "#/d" lists the dashboards and "#/d/<id>" shows one.
 function parseRoute() {
   const [path, query] = location.hash.replace(/^#\/?/, "").split("?");
@@ -1826,7 +1843,7 @@ function parseRoute() {
   if (parts[0] === "d" && /^\d+$/.test(parts[1] || "")) {
     return { view: "dashboard", id: Number(parts[1]), kiosk: params.has("kiosk"), theme: params.get("theme") };
   }
-  if (parts[0] === "s" && parts[1]) return { view: parts[2] === "monitor" ? "monitor" : "logs", name: parts[1] };
+  if (parts[0] === "p" && parts[1]) return { view: parts[2] === "monitor" ? "monitor" : "logs", name: parts[1] };
   if (parts[0] === "d") return { view: "dashlist" };
   return { view: "overview" };
 }
@@ -1873,7 +1890,7 @@ function applyRoute() {
     processes.forEach((s) => drawOverviewCharts(s.name));  // widths may have changed while hidden
     return;
   }
-  const base = `#/s/${encodeURIComponent(route.name)}/`;
+  const base = `#/p/${encodeURIComponent(route.name)}/`;
   $("tab-logs").href = base + "logs";
   $("tab-monitor").href = base + "monitor";
   $("tab-logs").classList.toggle("active", route.view === "logs");
@@ -1891,7 +1908,9 @@ function applyRoute() {
 
 async function refreshProcesses() {
   try {
-    processes = (await api("/api/processes")).processes;
+    const body = await api("/api/processes");
+    processes = body.processes;
+    buildMonitorRanges(body.history);
     showError(null);
   } catch (err) {
     showError("Cannot reach corral: " + (err.message || err));

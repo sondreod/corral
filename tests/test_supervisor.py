@@ -222,6 +222,7 @@ def test_web_api(tmp_path, harness):
         status, body = call("/api/processes")
         (info,) = json.loads(body)["processes"]
         assert status == 200 and info["name"] == "svc" and info["state"] == "running"
+        assert json.loads(body)["history"] is None  # no monitor: no history to offer
 
         status, body = call("/api/processes/svc/logs?q=NEEDLE&streams=stdout")
         assert [l["line"] for l in json.loads(body)["lines"]] == ["needle in haystack"]

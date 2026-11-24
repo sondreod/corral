@@ -161,7 +161,11 @@ class Handler(BaseHTTPRequestHandler):
                 except ConfigError as exc:
                     raise _Error(HTTPStatus.BAD_REQUEST, str(exc)) from None
             elif method == "GET" and parts == ["api", "processes"]:
-                self._json({"processes": [self._status(s) for s in self.supervisor.processes.values()]})
+                self._json({
+                    "processes": [self._status(s) for s in self.supervisor.processes.values()],
+                    # how far back the Monitoring tab can look
+                    "history": min(self.monitor.retention, MAX_RANGE) if self.monitor else None,
+                })
             elif len(parts) == 4 and parts[:2] == ["api", "processes"]:
                 process = self.supervisor.processes.get(parts[2])
                 if process is None:

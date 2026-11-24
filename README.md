@@ -57,8 +57,9 @@ interface re-reads the config file, the Procfiles and the `.env` files:
 new processes start, removed ones stop, and a running process whose command
 or environment changed is restarted; everything else keeps running. If anything is wrong (a
 Procfile line it cannot read, say) the reload is refused with the reason and
-nothing changes. `[server]`, `[runner]` and `[metrics]` settings only apply
-after a restart, which the reload reports.
+nothing changes. `[server]`, `[metrics]` and `[loki]` settings, and those
+under `[runner]` other than `path`, only apply after a restart, which the
+reload reports.
 
 ### Behaviour
 
@@ -68,6 +69,9 @@ after a restart, which the reload reports.
   those from cron or a systemd timer.
 - Stopping a process sends SIGTERM to its whole process group (the shell
   and everything it started), then SIGKILL after `stop_timeout` seconds.
+  The systemd service allows 90 seconds for corral to stop everything; with
+  a `stop_timeout` above 80, raise `TimeoutStopSec` too
+  (`systemctl edit corral`).
   When the shell exits, whatever it left running gets the same treatment.
 - Stop/start from the web page lasts until corral restarts; the
   `enabled` option decides the state at startup (and when it changes in a
@@ -123,7 +127,7 @@ restart.
 The start page shows the processes grouped by app, one card each with its
 state, current CPU and memory use, runs and log lines in the last hour, and
 CPU/memory trend lines. A process's **Monitoring** tab charts, over the last
-15 minutes to 7 days:
+15 minutes up to `history_days`:
 
 - **CPU** (percent of one core) and **memory** (resident set size), summed
   over the process's whole tree: the shell, the program and anything they

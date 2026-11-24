@@ -1,7 +1,9 @@
 # corral configuration.
 # Check it with:    corral --check
-# Apply changes:    systemctl reload corral   (apps, processes, .env files)
-#                   systemctl restart corral  ([server], [runner] and [metrics])
+# Apply changes:    systemctl reload corral   (apps, processes, .env files,
+#                                              [runner] path)
+#                   systemctl restart corral  ([server], [loki], [metrics] and
+#                                              the rest of [runner])
 
 [server]
 # Address of the web interface. There is no authentication, so only change
@@ -39,7 +41,7 @@ retention = "30d"
 
 # Also push every log line to Grafana Loki, or anything that takes its push
 # API (VictoriaLogs, Grafana Cloud), labelled app, process and stream. Lines
-# are still kept in SQLite. Needs a restart to change.
+# are still kept in SQLite.
 #
 # [loki]
 # url = "http://localhost:9428/insert/loki/api/v1/push"  # VictoriaLogs
@@ -68,7 +70,8 @@ retention = "30d"
 # env = { LOG_LEVEL = "info" } # for every process; wins over .env
 # restart_delay = 2            # seconds; doubles after each quick exit...
 # max_restart_delay = 60       # ...up to this
-# stop_timeout = 10            # seconds between SIGTERM and SIGKILL
+# stop_timeout = 10            # seconds between SIGTERM and SIGKILL; above 80,
+#                              # raise TimeoutStopSec in corral.service too
 # enabled = true               # false: only started from the web interface
 #
 # Every process is a long-running service, restarted whenever it exits.

@@ -20,10 +20,11 @@ CacheDirectory=corral
 Environment=HOME=/var/lib/corral
 Environment=UV_CACHE_DIR=/var/cache/corral/uv
 
-# corral stops its processes itself on SIGTERM; anything still alive
-# after the timeout is killed.
+# corral stops its processes itself on SIGTERM, waiting up to the longest
+# stop_timeout plus a few seconds; anything still alive after this timeout is
+# killed. Keep it above the largest stop_timeout in config.toml.
 KillMode=mixed
-TimeoutStopSec=30
+TimeoutStopSec=90
 
 [Install]
 WantedBy=multi-user.target

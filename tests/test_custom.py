@@ -188,8 +188,9 @@ def test_client_checks_its_arguments(emitted):
         client.Gauge("depth").set(float("nan"))
     with pytest.raises(ValueError):
         client.Gauge("9lives")
-    with pytest.raises(ValueError):
-        client.Gauge("ok", labelnames=["process"])
+    for reserved in ("process", "app"):  # added by the runner
+        with pytest.raises(ValueError, match="invalid label name"):
+            client.Gauge("ok_" + reserved, labelnames=[reserved])
     with pytest.raises(ValueError):
         client.Histogram("h", buckets=(2, 1))
 

@@ -7,7 +7,7 @@ fi
 
 if [ "$1" = "purge" ]; then
     rm -rf /var/lib/corral /var/cache/corral
-    rmdir /etc/corral/scripts /etc/corral 2>/dev/null || true
+    rmdir /etc/corral 2>/dev/null || true
     if getent passwd corral >/dev/null; then
         deluser --system --quiet corral || true
     fi

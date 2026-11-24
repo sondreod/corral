@@ -1,3 +1,4 @@
+import json
 import re
 import threading
 import urllib.request
@@ -51,6 +52,8 @@ def test_metrics_endpoint(tmp_path, harness):  # noqa: F811
     with urllib.request.urlopen(f"http://127.0.0.1:{server.server_address[1]}/metrics", timeout=5) as response:
         assert response.headers["Content-Type"] == prometheus.CONTENT_TYPE
         m = parse(response.read().decode())
+    with urllib.request.urlopen(f"http://127.0.0.1:{server.server_address[1]}/api/processes", timeout=5) as response:
+        assert json.loads(response.read())["history"] == 7 * 86400  # retention_days
     server.shutdown()
 
     assert value(m, "process_state", process="svc", state="running") == 1
